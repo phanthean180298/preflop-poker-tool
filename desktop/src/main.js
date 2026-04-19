@@ -103,12 +103,11 @@ document.getElementById("app").innerHTML = `
   <button class="topbar-btn" id="icmToggleBtn" title="Toggle ICM panel">ICM</button>
   <div id="serverStatus" class="server-pill loading">Connecting&#8230;</div>
 </div>
-<div class="pos-tabs" id="posTabs"></div>
 <div class="action-seq-bar" id="actionSeqBar"></div>
 <div class="body" id="mainBody">
   <div class="range-area">
     <div class="range-header">
-      <div class="range-title" id="rangeTitle">BTN &mdash; RFI &mdash; 40bb</div>
+      <div class="range-title" id="rangeTitle" style="display:none">BTN &mdash; RFI &mdash; 40bb</div>
       <div class="legend">
         <div class="legend-item"><div class="legend-dot" style="background:#e83c3c"></div>Raise</div>
         <div class="legend-item"><div class="legend-dot" style="background:#3c8fe8"></div>Call</div>
@@ -244,8 +243,6 @@ function buildPosTabs() {
       p === state.position ? " active" : ""
     }" data-pos="${p}">
       <div class="pos-name">${p}</div>
-      <div class="pos-stack">${state.stackBB}bb</div>
-      <div class="pos-range-bar" id="tabBar-${p}"></div>
     </button>
   `
     )

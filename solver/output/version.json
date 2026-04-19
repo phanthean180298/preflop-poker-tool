@@ -247,6 +247,14 @@
       "train_time_s": 21.13,
       "spots": 91,
       "hands": 169
+    },
+    {
+      "version": "v14",
+      "created": "2026-04-19T12:03:59.585163+00:00",
+      "iterations": 2000000,
+      "train_time_s": 12.04,
+      "spots": 91,
+      "hands": 169
     }
   ]
 }
