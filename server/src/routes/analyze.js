@@ -103,7 +103,11 @@ async function callGeminiAPI(base64Image, mimeType, model, apiKey) {
           ],
         },
       ],
-      generationConfig: { temperature: 0, maxOutputTokens: 1200 },
+      generationConfig: {
+        temperature: 0,
+        maxOutputTokens: 4096,
+        responseMimeType: "application/json",
+      },
     }),
   });
 
@@ -114,8 +118,16 @@ async function callGeminiAPI(base64Image, mimeType, model, apiKey) {
   }
 
   const data = await response.json();
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-  return JSON.parse(cleanJSON(content));
+  // Gemini 2.5+ has "thinking" parts (thought:true) before the actual output part
+  const parts = data.candidates?.[0]?.content?.parts ?? [];
+  const content = (parts.find((p) => !p.thought) ?? parts[0])?.text ?? "";
+  if (!content) throw new Error("Gemini returned empty response");
+  // responseMimeType=json means content is already valid JSON, but cleanJSON as fallback
+  try {
+    return JSON.parse(content);
+  } catch {
+    return JSON.parse(cleanJSON(content));
+  }
 }
 
 // ─── Call OpenAI vision API ─────────────────────────────────────────────────

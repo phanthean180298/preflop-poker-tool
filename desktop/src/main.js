@@ -39,8 +39,13 @@ const state = {
   positionCache: {},
   analyzeApiKey: localStorage.getItem("openai_api_key") || "",
   geminiApiKey: localStorage.getItem("gemini_api_key") || "",
-  analyzeModel: (function() {
-    const VALID_MODELS = ["gemini-2.5-flash","gemini-flash-latest","gpt-4o-mini","gpt-4o"];
+  analyzeModel: (function () {
+    const VALID_MODELS = [
+      "gemini-2.5-flash",
+      "gemini-flash-latest",
+      "gpt-4o-mini",
+      "gpt-4o",
+    ];
     const saved = localStorage.getItem("analyze_model");
     if (saved && VALID_MODELS.includes(saved)) return saved;
     localStorage.setItem("analyze_model", "gemini-2.5-flash");
