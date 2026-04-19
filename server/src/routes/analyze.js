@@ -69,6 +69,12 @@ Extract the following fields (use null if not visible or unclear):
 
 Rules:
 - "hero" is the player whose hole cards are shown face-up (visible cards). In most poker clients the hero sits at the BOTTOM of the screen.
+- SUITED vs OFFSUIT — use the card background COLOR to determine suit, not just the suit symbol:
+  - Many clients (CoinPoker, Natural8, GGPoker) color-code cards by suit: green=clubs, blue=diamonds, red=hearts, black/dark=spades (exact mapping may vary by client)
+  - If BOTH hole cards have the SAME background color → they are SUITED → append "s" (e.g. "76s")
+  - If the two hole cards have DIFFERENT background colors → they are OFFSUIT → append "o" (e.g. "76o")
+  - For pairs, omit the suffix (e.g. "JJ", "AA")
+  - Always look at the CARD BACKGROUND COLOR, not just the pip/suit symbol, because the symbol can be hard to read
 - DEALER BUTTON (D chip): The player whose seat has the yellow "D" or dealer button chip = BTN (Button). Use this as the anchor to assign ALL other positions.
   - Positions go CLOCKWISE from BTN: BTN → SB → BB → UTG → UTG1 → MP → HJ → CO → (back to BTN)
   - Count seats clockwise from the D chip to determine each player's position, including hero's.
