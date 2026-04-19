@@ -16,7 +16,7 @@
   --border: #2e3250;
   --accent: #e84040; /* raise/aggr – red */
   --call: #3db554; /* call – green (GTO+) */
-  --fold: #131828; /* fold – dark navy */
+  --fold: #3d4e8c; /* fold – medium blue (GTO Wizard style) */
   --mixed-raise: #e84040;
   --mixed-call: #3db554;
   --allin: #e84040;
@@ -333,7 +333,7 @@ body {
 }
 .range-cell[data-action="fold"] {
   background: var(--fold);
-  color: #5a6488;
+  color: #8fa0d4;
 }
 
 /* Mixed: proportional gradient applied inline by JS */

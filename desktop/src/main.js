@@ -174,7 +174,7 @@ function actionTag(action, freq) {
 function cellBg(d) {
   const RAISE = "#e84040";
   const CALL = "#3db554";
-  const FOLD = "#131828";
+  const FOLD = "#3d4e8c";
 
   const strat = d.adjusted_strategy || d.strategy;
   if (!strat) {
@@ -295,7 +295,7 @@ function applyRangeToGrid(rangeData) {
       if (d) {
         cell.dataset.action = actionTag(d.action, d.freq);
         cell.style.background = cellBg(d);
-        cell.style.color = d.action === "fold" ? "#5a6488" : "#fff";
+        cell.style.color = d.action === "fold" ? "#8fa0d4" : "#fff";
         const evStr = d.ev ? ` · EV: ${evLabel(d.ev[d.action])}` : "";
         cell.title = `${hand} → ${d.action.toUpperCase()} ${pct(d.freq)}%${
           d.sizeBB > 0 ? ` (${d.sizeBB.toFixed(1)}bb)` : ""
@@ -1471,7 +1471,7 @@ async function fetchSingleHand(hand) {
     if (cell) {
       cell.dataset.action = actionTag(d.action, d.freq);
       cell.style.background = cellBg(d);
-      cell.style.color = d.action === "fold" ? "#5a6488" : "#fff";
+      cell.style.color = d.action === "fold" ? "#8fa0d4" : "#fff";
       cell.classList.remove("loading");
     }
     renderActionSeqStrip();
