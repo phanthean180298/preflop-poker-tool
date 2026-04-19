@@ -1,0 +1,16 @@
+{
+  "current": "v2",
+  "versions": [
+    "v2"
+  ],
+  "history": [
+    {
+      "version": "v2",
+      "created": "2026-04-19T05:10:50.785521+00:00",
+      "iterations": 1000000,
+      "train_time_s": 28.87,
+      "spots": 91,
+      "hands": 169
+    }
+  ]
+}

@@ -5,6 +5,7 @@ const { initDB } = require("./utils/db");
 const preflopRouter = require("./routes/preflop");
 const sessionRouter = require("./routes/session");
 const icmRouter = require("./routes/icm");
+const analyzeRouter = require("./routes/analyze");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -20,6 +21,7 @@ initDB();
 app.use("/api/preflop", preflopRouter);
 app.use("/api/session", sessionRouter);
 app.use("/api/icm", icmRouter);
+app.use("/api/analyze", express.json({ limit: "20mb" }), analyzeRouter);
 
 app.get("/health", (req, res) =>
   res.json({ status: "ok", timestamp: new Date().toISOString() })

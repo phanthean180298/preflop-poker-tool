@@ -1,7 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const { query, TABLE_POSITIONS } = require("../engine/preflop");
+const { lookupStrategy, loaderStats } = require("../engine/cfr_loader");
+const { adjustStrategy, bestAction } = require("../engine/ev");
 const { makeCacheKey, getCached, setCache } = require("../middleware/cache");
+const { logAction, getLogStats } = require("../middleware/logger");
 
 /**
  * POST /api/preflop/query
@@ -139,6 +142,169 @@ router.get("/positions", (req, res) => {
   const { table_size = 6 } = req.query;
   const positions = TABLE_POSITIONS[Number(table_size)] || TABLE_POSITIONS[6];
   res.json({ table_size: Number(table_size), positions });
+});
+
+/**
+ * POST /api/preflop/action
+ * CFR-based strategy lookup (requires solver output JSON to be present).
+ *
+ * Body:
+ * {
+ *   "position": "BTN",
+ *   "vs": "BB",
+ *   "hand": "AKs",
+/**
+ * POST /api/preflop/action
+ *
+ * Full tournament-aware decision engine.
+ * Accepts both compressed state (hero_pos/villain_pos/spot_type) and
+ * legacy params (position/vs/facing).
+ *
+ * Body (all optional except hand):
+ * {
+ *   // ── Position / spot ───────────────────────────────────────────
+ *   "hero_pos":    "BTN",          // preferred (compressed state)
+ *   "villain_pos": "BB",
+ *   "spot_type":   "vs_open",      // "open"|"vs_open"|"vs_3bet"|"vs_4bet"
+ *   "pot_type":    "SRP",          // "SRP"|"3BP"|"4BP" (informational)
+ *   // legacy aliases still accepted:
+ *   "position":    "BTN",
+ *   "vs":          "BB",
+ *   "facing":      "vs_rfi",
+ *
+ *   "hand": "AKs",
+ *
+ *   // ── Tournament context (all optional) ─────────────────────────
+ *   "stack_bb":          25,
+ *   "villain_stack_bb":  18,
+ *   "players_left":      120,
+ *   "total_players":     1000,
+ *   "stage":             "bubble",   // "early"|"mid"|"bubble"|"itm"|"ft"
+ *   "bounty":            20,         // villain's bounty prize
+ *   "hero_bounty":       15,
+ *   "buyin":             10
+ * }
+ *
+ * Response:
+ * {
+ *   "spot":              "BTN_RFI",
+ *   "hand":              "AKs",
+ *   "strategy":          { "raise": 0.82, "fold": 0.18 },      // raw CFR
+ *   "adjusted_strategy": { "raise": 0.61, "fold": 0.39 },      // tournament-adjusted
+ *   "best_action":       "raise",
+ *   "factors": {
+ *     "icm_risk": 0.58, "bounty_ev": 2.1, "buy_in_factor": 1.0, ...
+ *   },
+ *   "fallback": false
+ * }
+ */
+router.post("/action", (req, res) => {
+  const t0 = Date.now();
+
+  const {
+    // compressed state
+    hero_pos,
+    villain_pos,
+    spot_type,
+    // legacy
+    position,
+    vs,
+    vs_position, // alias for villain_pos / vs
+    facing,
+    spot,
+    // hand
+    hand,
+    // tournament context
+    stack_bb = 100,
+    villain_stack_bb = 100,
+    players_left = null,
+    total_players = null,
+    stage = "mid",
+    bounty = 0,
+    hero_bounty = 0,
+    buyin = 10,
+  } = req.body;
+
+  if (!hand) {
+    return res.status(400).json({ error: "Missing required field: hand" });
+  }
+
+  // Resolve position params: compressed state takes precedence
+  const resolvedPos = hero_pos || position || null;
+  const resolvedVs = villain_pos || vs || vs_position || null;
+  const resolvedFacing = spot_type || facing || null;
+
+  const lookup = lookupStrategy({
+    spot,
+    position: resolvedPos,
+    vs: resolvedVs,
+    facing: resolvedFacing,
+    hand,
+  });
+
+  if (lookup.error) {
+    return res.status(400).json({ error: lookup.error });
+  }
+
+  // Estimate p_win from hand strength (used by bounty + ICM calcs)
+  // Simple: strong hands win more often; EV engine refines this
+  const RANKS = "23456789TJQKA";
+  function hs(h) {
+    if (!h) return 0.5;
+    if (h.length === 2) return (RANKS.indexOf(h[0]) + 1) / 13;
+    const s = h.endsWith("s"),
+      b = h.slice(0, 2);
+    const r1 = RANKS.indexOf(b[0]),
+      r2 = RANKS.indexOf(b[1]);
+    const hi = Math.max(r1, r2),
+      lo = Math.min(r1, r2);
+    return Math.min(
+      1,
+      Math.max(0, (hi * 2.5 + lo * 1.5 - (hi - lo) * 1.5 + (s ? 2 : 0)) / 52)
+    );
+  }
+  const pWin = 0.25 + hs(lookup.hand) * 0.55; // scale to [0.25, 0.80]
+
+  const ctx = {
+    stage,
+    stackBB: Number(stack_bb),
+    villainStackBB: Number(villain_stack_bb),
+    playersLeft: players_left != null ? Number(players_left) : 100,
+    totalPlayers: total_players != null ? Number(total_players) : 1000,
+    bounty: Number(bounty),
+    heroBounty: Number(hero_bounty),
+    buyIn: Number(buyin),
+    pWin,
+    spotType: resolvedFacing || "vs_open",
+  };
+
+  const { adjusted, factors } = adjustStrategy(lookup.strategy, ctx);
+  const best = bestAction(adjusted);
+
+  const result = {
+    spot: lookup.spot,
+    hand: lookup.hand,
+    strategy: lookup.strategy,
+    adjusted_strategy: adjusted,
+    best_action: best,
+    factors,
+    fallback: lookup.fallback ?? false,
+  };
+  if (lookup.warning) result.warning = lookup.warning;
+
+  logAction(req, result, Date.now() - t0, req.body);
+  res.json(result);
+});
+
+/**
+ * GET /api/preflop/cfr/stats
+ * CFR loader metadata + request log aggregates.
+ */
+router.get("/cfr/stats", (req, res) => {
+  res.json({
+    loader: loaderStats(),
+    log: getLogStats(),
+  });
 });
 
 module.exports = router;
