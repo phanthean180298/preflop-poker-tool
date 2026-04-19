@@ -37,6 +37,10 @@ const state = {
   importedRange: null,
   refImage: null,
   positionCache: {},
+  multiway: {
+    active: false,
+    actions: {}, // pos -> "fold"|"limp"|"raise"|"call"|"3bet"|"4bet"|"allin"
+  },
   analyzeApiKey: localStorage.getItem("openai_api_key") || "",
   geminiApiKey: localStorage.getItem("gemini_api_key") || "",
   analyzeModel: (function () {
@@ -97,9 +101,11 @@ document.getElementById("app").innerHTML = `
   <input type="file" id="fileJsonInput" accept=".json" style="display:none"/>
   <input type="file" id="fileImgInput" accept="image/*" style="display:none"/>
   <button class="topbar-btn" id="icmToggleBtn" title="Toggle ICM panel">ICM</button>
+  <button class="topbar-btn" id="multiwayBtn" title="Toggle multiway action sequence builder">&#9654; Multi</button>
   <div id="serverStatus" class="server-pill loading">Connecting&#8230;</div>
 </div>
 <div class="pos-tabs" id="posTabs"></div>
+<div class="action-seq-bar" id="actionSeqBar" style="display:none"></div>
 <div class="body" id="mainBody">
   <div class="range-area">
     <div class="range-header">
@@ -149,7 +155,15 @@ document.getElementById("app").innerHTML = `
 
 // ─── Helpers
 function rangeKey() {
-  return `${state.scenario}|${state.position}|${state.vsPosition}|${state.stackBB}|${state.anteBB}|${state.tableSize}`;
+  const base = `${state.scenario}|${state.position}|${state.vsPosition}|${state.stackBB}|${state.anteBB}|${state.tableSize}`;
+  if (state.multiway.active && Object.keys(state.multiway.actions).length > 0) {
+    const seqStr = Object.entries(state.multiway.actions)
+      .sort()
+      .map(([p, a]) => `${p}:${a}`)
+      .join(",");
+    return `${base}|mw:${seqStr}`;
+  }
+  return base;
 }
 function actionTag(action, freq) {
   if (action === "fold") return "fold";
@@ -955,6 +969,207 @@ function renderSettingsPanel() {
   if (viewBtn) viewBtn.addEventListener("click", showRefImage);
 }
 
+// ─── Multiway action sequence strip ──────────────────────────────────────────
+
+/**
+ * Compute bet level (0=no bet, 1=open, 2=3bet, 3=4bet) as of position's turn.
+ * Looks at actions assigned to positions BEFORE pos in preflop order.
+ */
+function getStripBetLevel(upToPos) {
+  let level = 0;
+  for (const pos of state.positions) {
+    if (pos === upToPos) break;
+    const act = state.multiway.actions[pos];
+    if (act === "raise" || act === "limp") level = Math.max(level, act === "raise" ? 1 : 0);
+    if (act === "allin") level = Math.max(level, 1);
+    if (act === "3bet") level = Math.max(level, 2);
+    if (act === "4bet") level = Math.max(level, 3);
+  }
+  return level;
+}
+
+/** Returns available action list for a position given prior sequence state. */
+function getStripActions(pos) {
+  const level = getStripBetLevel(pos);
+  const stack = state.stackBB;
+  const rfi = state.rfiSizeBB || 2.5;
+  const tbet = state.threeBetSizeBB || 7.5;
+  const fbet = Math.round(tbet * 2.5 * 2) / 2;
+
+  if (level === 0) {
+    return [
+      { key: "fold",  label: "Fold" },
+      { key: "limp",  label: "Limp" },
+      { key: "raise", label: `Raise ${rfi}` },
+      { key: "allin", label: `All-in ${stack}` },
+    ];
+  }
+  if (level === 1) {
+    return [
+      { key: "fold",  label: "Fold" },
+      { key: "call",  label: "Call" },
+      { key: "3bet",  label: `3bet ${tbet}` },
+      { key: "allin", label: `All-in ${stack}` },
+    ];
+  }
+  if (level === 2) {
+    return [
+      { key: "fold",  label: "Fold" },
+      { key: "call",  label: "Call" },
+      { key: "4bet",  label: `4bet ${fbet}` },
+      { key: "allin", label: `All-in ${stack}` },
+    ];
+  }
+  // level >= 3
+  return [
+    { key: "fold",  label: "Fold" },
+    { key: "call",  label: "Call" },
+    { key: "allin", label: `All-in ${stack}` },
+  ];
+}
+
+/**
+ * Build action_sequence array for the API, with state.position as hero.
+ * Only includes positions with explicitly set actions that come before hero
+ * in preflop order.
+ */
+function buildActionSequenceForAPI() {
+  const seq = [];
+  let found = false;
+  for (const pos of state.positions) {
+    if (pos === state.position) {
+      seq.push({ pos, action: "hero" });
+      found = true;
+      break;
+    }
+    const act = state.multiway.actions[pos];
+    if (act) seq.push({ pos, action: act });
+  }
+  if (!found) seq.push({ pos: state.position, action: "hero" });
+  return seq;
+}
+
+/**
+ * Build action_sequence for any targetPos as hero (used for position comparison).
+ * Includes all set actions up to targetPos in preflop order.
+ */
+function buildSeqForPosition(targetPos) {
+  const seq = [];
+  let found = false;
+  for (const pos of state.positions) {
+    if (pos === targetPos) {
+      seq.push({ pos, action: "hero" });
+      found = true;
+      break;
+    }
+    const act = state.multiway.actions[pos];
+    if (act) seq.push({ pos, action: act });
+  }
+  if (!found) seq.push({ pos: targetPos, action: "hero" });
+  return seq;
+}
+
+/** Render the action-sequence strip */
+function renderActionSeqStrip() {
+  const bar = document.getElementById("actionSeqBar");
+  if (!bar) return;
+  if (!state.multiway.active) { bar.style.display = "none"; return; }
+  bar.style.display = "";
+
+  const heroPos = state.position;
+  const heroIdx = state.positions.indexOf(heroPos);
+
+  const cards = state.positions.map((pos, i) => {
+    const isHero = pos === heroPos;
+    const isAfter = i > heroIdx;
+    const selectedAct = state.multiway.actions[pos];
+
+    if (isHero) {
+      // Show what GTO says for hero if a hand is selected
+      const rd = state.rangeCache[rangeKey()];
+      const heroHand = state.selectedHand;
+      const heroD = rd && heroHand ? rd[heroHand] : null;
+      const heroAdvice = heroD
+        ? `<div class="aseq-hero-advice ${heroD.action}">${heroD.action.toUpperCase()} ${Math.round((heroD.freq ?? 1) * 100)}%</div>`
+        : "";
+      return `
+        <div class="aseq-card hero" data-pos="${pos}">
+          <div class="aseq-pos-name">${pos}</div>
+          <div class="aseq-stack">${state.stackBB}bb</div>
+          <div class="aseq-hero-marker">HERO</div>
+          ${heroAdvice}
+        </div>`;
+    }
+
+    const actions = getStripActions(pos);
+    const actionBtns = actions
+      .map((a) => {
+        const isSel = selectedAct === a.key;
+        const cls = `aseq-btn${isSel ? " selected" : ""} ${a.key}`;
+        return `<button class="${cls}" data-pos="${pos}" data-act="${a.key}">${a.label}</button>`;
+      })
+      .join("");
+
+    let cardCls = "aseq-card";
+    if (isAfter) cardCls += " future";
+    if (selectedAct === "fold") cardCls += " folded";
+    else if (selectedAct) cardCls += " acted";
+
+    return `
+      <div class="${cardCls}" data-pos="${pos}">
+        <div class="aseq-pos-name">${pos}</div>
+        <div class="aseq-stack">${state.stackBB}bb</div>
+        <div class="aseq-actions">${actionBtns}</div>
+      </div>`;
+  }).join("");
+
+  // Summarize the current sequence
+  const seqParts = state.positions
+    .filter((p) => state.multiway.actions[p])
+    .map((p) => {
+      const a = state.multiway.actions[p];
+      const color = a === "fold" ? "#4a5580" : a === "call" ? "#3c8fe8" : "#e83c3c";
+      return `<span style="color:${color}">${p} <b>${a}</b></span>`;
+    });
+  const seqLabel = seqParts.length
+    ? `${seqParts.join(" → ")} → <span style="color:#00e8b0">${heroPos} ?</span>`
+    : `<span style="color:var(--muted)">Set actions below to define the sequence</span>`;
+
+  bar.innerHTML = `
+    <div class="aseq-header">
+      <div class="aseq-seq-label">${seqLabel}</div>
+      <button class="aseq-clear" id="clearSeqBtn">&#10005; Clear</button>
+    </div>
+    <div class="aseq-scroll">${cards}</div>`;
+
+  // Wire action-button clicks
+  bar.querySelectorAll(".aseq-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const { pos, act } = e.currentTarget.dataset;
+      if (state.multiway.actions[pos] === act) {
+        delete state.multiway.actions[pos]; // toggle off
+      } else {
+        state.multiway.actions[pos] = act;
+      }
+      renderActionSeqStrip();
+      // Invalidate cache and reload
+      state.positionCache = {};
+      const key = rangeKey();
+      delete state.rangeCache[key];
+      if (state.multiway.active) loadFullRange();
+    });
+  });
+
+  bar.querySelector("#clearSeqBtn")?.addEventListener("click", () => {
+    state.multiway.actions = {};
+    state.positionCache = {};
+    delete state.rangeCache[rangeKey()];
+    renderActionSeqStrip();
+    if (state.multiway.active) loadFullRange();
+  });
+}
+
 // ─── ICM calculation
 async function calculateICM() {
   const btn = document.getElementById("calcIcmBtn");
@@ -1035,33 +1250,47 @@ function openPositions() {
 }
 
 async function fetchAllPositions(hand) {
-  const cacheKey = `pos:${hand}:${state.scenario}:${state.vsPosition}:${state.stackBB}:${state.tournament.stage}`;
+  const mwSuffix = state.multiway.active
+    ? "|mw:" + Object.entries(state.multiway.actions).sort().map(([p, a]) => `${p}:${a}`).join(",")
+    : "";
+  const cacheKey = `pos:${hand}:${state.scenario}:${state.vsPosition}:${state.stackBB}:${state.tournament.stage}${mwSuffix}`;
   if (state.positionCache[cacheKey]) return state.positionCache[cacheKey];
 
-  const spotType = SCENARIO_TO_SPOT_TYPE[state.scenario] || state.scenario;
-  const positions = openPositions();
+  const positions = state.positions;
 
   const results = await Promise.allSettled(
-    positions.map((pos) =>
-      fetch(`${API}/preflop/action`, {
+    positions.map((pos) => {
+      const body = state.multiway.active
+        ? {
+            hand,
+            action_sequence: buildSeqForPosition(pos),
+            table_size: state.tableSize,
+            stack_bb: state.stackBB,
+            stage: state.tournament.stage,
+            bounty: state.tournament.bounty,
+            hero_bounty: state.tournament.heroBounty,
+            buyin: state.tournament.buyin,
+          }
+        : {
+            hero_pos: pos,
+            villain_pos: state.vsPosition,
+            spot_type: SCENARIO_TO_SPOT_TYPE[state.scenario] || state.scenario,
+            hand,
+            stack_bb: state.stackBB,
+            stage: state.tournament.stage,
+            bounty: state.tournament.bounty,
+            hero_bounty: state.tournament.heroBounty,
+            buyin: state.tournament.buyin,
+          };
+      return fetch(`${API}/preflop/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          hero_pos: pos,
-          villain_pos: state.vsPosition,
-          spot_type: spotType,
-          hand,
-          stack_bb: state.stackBB,
-          stage: state.tournament.stage,
-          bounty: state.tournament.bounty,
-          hero_bounty: state.tournament.heroBounty,
-          buyin: state.tournament.buyin,
-        }),
+        body: JSON.stringify(body),
       })
         .then((r) => r.json())
         .then((raw) => ({ pos, ...mapActionResponse(raw) }))
-        .catch(() => ({ pos, error: true }))
-    )
+        .catch(() => ({ pos, error: true }));
+    })
   );
 
   const map = {};
@@ -1179,20 +1408,36 @@ function mapActionResponse(raw) {
 
 async function fetchSingleHand(hand) {
   try {
-    const spotType = SCENARIO_TO_SPOT_TYPE[state.scenario] || state.scenario;
-    const body = {
-      hero_pos: state.position,
-      villain_pos: state.vsPosition,
-      spot_type: spotType,
-      hand,
-      stack_bb: state.stackBB,
-      players_left: state.icm.playersRemaining,
-      total_players: state.icm.totalPlayers,
-      stage: state.tournament.stage,
-      bounty: state.tournament.bounty,
-      hero_bounty: state.tournament.heroBounty,
-      buyin: state.tournament.buyin,
-    };
+    let body;
+    if (state.multiway.active) {
+      body = {
+        hand,
+        action_sequence: buildActionSequenceForAPI(),
+        table_size: state.tableSize,
+        stack_bb: state.stackBB,
+        players_left: state.icm.playersRemaining,
+        total_players: state.icm.totalPlayers,
+        stage: state.tournament.stage,
+        bounty: state.tournament.bounty,
+        hero_bounty: state.tournament.heroBounty,
+        buyin: state.tournament.buyin,
+      };
+    } else {
+      const spotType = SCENARIO_TO_SPOT_TYPE[state.scenario] || state.scenario;
+      body = {
+        hero_pos: state.position,
+        villain_pos: state.vsPosition,
+        spot_type: spotType,
+        hand,
+        stack_bb: state.stackBB,
+        players_left: state.icm.playersRemaining,
+        total_players: state.icm.totalPlayers,
+        stage: state.tournament.stage,
+        bounty: state.tournament.bounty,
+        hero_bounty: state.tournament.heroBounty,
+        buyin: state.tournament.buyin,
+      };
+    }
     const r = await fetch(`${API}/preflop/action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1212,6 +1457,7 @@ async function fetchSingleHand(hand) {
       cell.dataset.action = actionTag(d.action, d.freq);
       cell.classList.remove("loading");
     }
+    if (state.multiway.active) renderActionSeqStrip();
     logSession(body, d);
   } catch (err) {
     document.getElementById(
@@ -1228,6 +1474,7 @@ async function loadFullRange() {
     applyRangeToGrid(cached);
     renderRangeSummary(cached);
     updateRangeTitle();
+    if (state.multiway.active) renderActionSeqStrip();
     return;
   }
   if (btn) {
@@ -1236,21 +1483,49 @@ async function loadFullRange() {
   }
   showLoadingGrid();
   try {
-    const params = new URLSearchParams({
-      position: state.position,
-      action: state.scenario,
-      stack_bb: state.stackBB,
-      ante_bb: state.anteBB,
-      vs_position: state.vsPosition,
-      table_size: state.tableSize,
-    });
-    const r = await fetch(`${API}/preflop/range?${params}`);
-    const data = await r.json();
-    if (data.error) throw new Error(data.error);
-    state.rangeCache[key] = data.range;
-    applyRangeToGrid(data.range);
-    renderRangeSummary(data.range);
+    let range;
+    if (state.multiway.active) {
+      // ── Multiway: use /range-action with action_sequence ─────────────────
+      const seq = buildActionSequenceForAPI();
+      const body = {
+        action_sequence: seq,
+        table_size: state.tableSize,
+        stack_bb: state.stackBB,
+        stage: state.tournament.stage,
+        bounty: state.tournament.bounty,
+        hero_bounty: state.tournament.heroBounty,
+        buyin: state.tournament.buyin,
+        players_left: state.icm.playersRemaining,
+        total_players: state.icm.totalPlayers,
+      };
+      const r = await fetch(`${API}/preflop/range-action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (data.error) throw new Error(data.error);
+      range = data.range;
+    } else {
+      // ── Standard: use /range endpoint ────────────────────────────────────
+      const params = new URLSearchParams({
+        position: state.position,
+        action: state.scenario,
+        stack_bb: state.stackBB,
+        ante_bb: state.anteBB,
+        vs_position: state.vsPosition,
+        table_size: state.tableSize,
+      });
+      const r = await fetch(`${API}/preflop/range?${params}`);
+      const data = await r.json();
+      if (data.error) throw new Error(data.error);
+      range = data.range;
+    }
+    state.rangeCache[key] = range;
+    applyRangeToGrid(range);
+    renderRangeSummary(range);
     updateRangeTitle();
+    if (state.multiway.active) renderActionSeqStrip();
   } catch (err) {
     alert("Failed to load range: " + err.message);
     buildEmptyGrid();
@@ -1340,6 +1615,8 @@ async function updatePositions(tableSize) {
     buildPosTabs();
     document.getElementById("tableLabel").textContent = `${tableSize}-max`;
     document.getElementById("posTabs").addEventListener("click", onPosTabClick);
+    state.multiway.actions = {}; // reset when table layout changes
+    if (state.multiway.active) renderActionSeqStrip();
     return data.positions;
   } catch {
     const fallback = {
@@ -1352,6 +1629,8 @@ async function updatePositions(tableSize) {
     state.positions = fallback[tableSize] || fallback[6];
     buildPosTabs();
     document.getElementById("posTabs").addEventListener("click", onPosTabClick);
+    state.multiway.actions = {};
+    if (state.multiway.active) renderActionSeqStrip();
     return state.positions;
   }
 }
@@ -1364,6 +1643,17 @@ function onPosTabClick(e) {
     .querySelectorAll(".pos-tab")
     .forEach((t) => t.classList.toggle("active", t === tab));
   updateRangeTitle();
+  if (state.multiway.active) {
+    renderActionSeqStrip();
+    // Reload range for new hero position using current sequence
+    state.positionCache = {};
+    const key = rangeKey();
+    if (!state.rangeCache[key]) {
+      buildEmptyGrid();
+      loadFullRange();
+      return;
+    }
+  }
   const key = rangeKey();
   const cached = state.rangeCache[key];
   if (cached) {
@@ -1874,6 +2164,23 @@ document.getElementById("icmToggleBtn").addEventListener("click", () => {
     .querySelectorAll(".panel-tab")
     .forEach((t) => t.classList.toggle("active", t.dataset.tab === "icm"));
   renderICMPanel();
+});
+
+document.getElementById("multiwayBtn").addEventListener("click", () => {
+  state.multiway.active = !state.multiway.active;
+  const btn = document.getElementById("multiwayBtn");
+  btn.style.background = state.multiway.active ? "var(--accent)" : "";
+  btn.style.color = state.multiway.active ? "#0d1428" : "";
+  state.positionCache = {};
+  delete state.rangeCache[rangeKey()];
+  if (state.multiway.active) {
+    renderActionSeqStrip();
+    loadFullRange();
+  } else {
+    document.getElementById("actionSeqBar").style.display = "none";
+    buildEmptyGrid();
+    loadFullRange();
+  }
 });
 
 // ─── Init

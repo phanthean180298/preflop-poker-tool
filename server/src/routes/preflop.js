@@ -211,8 +211,8 @@ router.get("/positions", (req, res) => {
 function _detectStage(playersLeft, totalPlayers) {
   if (!playersLeft || !totalPlayers || totalPlayers <= 0) return null;
   const ratio = playersLeft / totalPlayers;
-  if (ratio > 0.60) return "early";
-  if (ratio > 0.20) return "mid";
+  if (ratio > 0.6) return "early";
+  if (ratio > 0.2) return "mid";
   if (ratio > 0.08) return "bubble"; // approaching money (15% → bubble zone)
   if (ratio > 0.02) return "itm";
   return "ft";
@@ -227,8 +227,19 @@ function computeActionSizing(spotName, stackBB) {
   if (!spotName) return null;
   const sb = Number(stackBB) || 100;
 
-  const IP_ORDER = { BB: 0, SB: 1, UTG: 2, UTG1: 3, MP: 4, HJ: 5, CO: 6, BTN: 7 };
-  function isIp(a, b) { return (IP_ORDER[a] ?? 0) > (IP_ORDER[b] ?? 0); }
+  const IP_ORDER = {
+    BB: 0,
+    SB: 1,
+    UTG: 2,
+    UTG1: 3,
+    MP: 4,
+    HJ: 5,
+    CO: 6,
+    BTN: 7,
+  };
+  function isIp(a, b) {
+    return (IP_ORDER[a] ?? 0) > (IP_ORDER[b] ?? 0);
+  }
   function rfiSize(pos) {
     if (sb <= 15) return sb;
     if (sb <= 20) return 2.0;
@@ -241,7 +252,9 @@ function computeActionSizing(spotName, stackBB) {
   function fbetSize(tbet) {
     return Math.min(Math.round(tbet * 2.3 * 10) / 10, sb);
   }
-  function bbLabel(n) { return n >= sb ? "allin" : `${n}BB`; }
+  function bbLabel(n) {
+    return n >= sb ? "allin" : `${n}BB`;
+  }
 
   const rfiM = spotName.match(/^(\w+)_RFI$/);
   const vs4M = spotName.match(/^(\w+)_vs_4bet_(\w+)$/);
@@ -257,20 +270,32 @@ function computeActionSizing(spotName, stackBB) {
     const rfi = rfiSize(opener);
     const tbet = tbetSize(rfi, isIp(actor, opener));
     const fbet = fbetSize(tbet);
-    return { "4bet": `raise_${bbLabel(fbet)}`, call: `call_${bbLabel(tbet)}`, fold: "fold" };
+    return {
+      "4bet": `raise_${bbLabel(fbet)}`,
+      call: `call_${bbLabel(tbet)}`,
+      fold: "fold",
+    };
   }
   if (vs3M) {
     const [, opener, tbettor] = vs3M;
     const rfi = rfiSize(opener);
     const tbet = tbetSize(rfi, isIp(tbettor, opener));
     const fbet = fbetSize(tbet);
-    return { "4bet": `raise_${bbLabel(fbet)}`, call: `call_${bbLabel(tbet)}`, fold: "fold" };
+    return {
+      "4bet": `raise_${bbLabel(fbet)}`,
+      call: `call_${bbLabel(tbet)}`,
+      fold: "fold",
+    };
   }
   if (vsRM) {
     const [, actor, opener] = vsRM;
     const rfi = rfiSize(opener);
     const tbet = tbetSize(rfi, isIp(actor, opener));
-    return { "3bet": `raise_${bbLabel(tbet)}`, call: `call_${bbLabel(rfi)}`, fold: "fold" };
+    return {
+      "3bet": `raise_${bbLabel(tbet)}`,
+      call: `call_${bbLabel(rfi)}`,
+      fold: "fold",
+    };
   }
   return null;
 }
@@ -299,7 +324,7 @@ router.post("/action", (req, res) => {
     villain_stack_bb = 100,
     players_left = null,
     total_players = null,
-    stage = null,          // null → auto-detect from players_left/total_players
+    stage = null, // null → auto-detect from players_left/total_players
     bounty = 0,
     hero_bounty = 0,
     buyin = 10,
@@ -307,9 +332,7 @@ router.post("/action", (req, res) => {
 
   // Auto-detect stage from player counts when not explicitly provided
   const resolvedStage =
-    stage ||
-    _detectStage(Number(players_left), Number(total_players)) ||
-    "mid";
+    stage || _detectStage(Number(players_left), Number(total_players)) || "mid";
 
   if (!hand) {
     return res.status(400).json({ error: "Missing required field: hand" });
@@ -403,7 +426,10 @@ router.post("/action", (req, res) => {
 
   const best = bestAction(finalStrategy);
 
-  const actionSizing = computeActionSizing(lookup.spot, lookup.stackProfile ?? stack_bb);
+  const actionSizing = computeActionSizing(
+    lookup.spot,
+    lookup.stackProfile ?? stack_bb
+  );
 
   const result = {
     spot: lookup.spot,
@@ -423,6 +449,151 @@ router.post("/action", (req, res) => {
 
   logAction(req, result, Date.now() - t0, req.body);
   res.json(result);
+});
+
+/**
+ * POST /api/preflop/range-action
+ * Full 169-hand range using action_sequence (multiway-aware).
+ * Same auth/context params as /action.
+ *
+ * Body: { action_sequence, table_size?, stack_bb?, stage?, bounty?, ... }
+ * Response: { range: { [hand]: { action, freq, sizeBB, pushFoldMode,
+ *                                 strategy, adjusted_strategy, factors, fallback } },
+ *             parsed_state, elapsed_ms }
+ */
+router.post("/range-action", (req, res) => {
+  const t0 = Date.now();
+  const {
+    action_sequence,
+    table_size = 6,
+    stack_bb = 100,
+    villain_stack_bb = 100,
+    stage = "mid",
+    bounty = 0,
+    hero_bounty = 0,
+    buyin = 10,
+    players_left = null,
+    total_players = null,
+  } = req.body;
+
+  if (!Array.isArray(action_sequence) || action_sequence.length === 0) {
+    return res.status(400).json({ error: "action_sequence is required" });
+  }
+
+  let parsedState;
+  try {
+    parsedState = parseActionSequence(action_sequence, Number(table_size));
+  } catch (e) {
+    return res.status(400).json({ error: `action_sequence: ${e.message}` });
+  }
+
+  const RANKS = [
+    "A",
+    "K",
+    "Q",
+    "J",
+    "T",
+    "9",
+    "8",
+    "7",
+    "6",
+    "5",
+    "4",
+    "3",
+    "2",
+  ];
+  const RANK_VALS = "23456789TJQKA";
+  function hsScore(h) {
+    if (!h || h.length === 0) return 0.5;
+    if (h.length === 2) return (RANK_VALS.indexOf(h[0]) + 1) / 13;
+    const s = h.endsWith("s"),
+      b = h.slice(0, 2);
+    const r1 = RANK_VALS.indexOf(b[0]),
+      r2 = RANK_VALS.indexOf(b[1]);
+    const hi = Math.max(r1, r2),
+      lo = Math.min(r1, r2);
+    return Math.min(
+      1,
+      Math.max(0, (hi * 2.5 + lo * 1.5 - (hi - lo) * 1.5 + (s ? 2 : 0)) / 52)
+    );
+  }
+
+  const stackBB = Number(stack_bb);
+  const isMultiway =
+    parsedState.callers_count > 0 || parsedState.pot_type !== "SRP";
+  const range = {};
+
+  for (let i = 0; i < 13; i++) {
+    for (let j = 0; j < 13; j++) {
+      let hand;
+      if (i === j) hand = RANKS[i] + RANKS[j];
+      else if (i < j) hand = RANKS[i] + RANKS[j] + "s";
+      else hand = RANKS[j] + RANKS[i] + "o";
+
+      const lookup = lookupStrategy({
+        position: parsedState.hero_pos,
+        vs: parsedState.aggressor_pos,
+        facing: parsedState.spot_type,
+        hand,
+      });
+
+      if (lookup.error) {
+        range[hand] = {
+          action: "fold",
+          freq: 1,
+          sizeBB: 0,
+          pushFoldMode: stackBB <= 15,
+        };
+        continue;
+      }
+
+      const pWin = 0.25 + hsScore(lookup.hand) * 0.55;
+      const ctx = {
+        stage,
+        stackBB,
+        villainStackBB: Number(villain_stack_bb),
+        playersLeft: players_left != null ? Number(players_left) : 100,
+        totalPlayers: total_players != null ? Number(total_players) : 1000,
+        bounty: Number(bounty),
+        heroBounty: Number(hero_bounty),
+        buyIn: Number(buyin),
+        pWin,
+        spotType: parsedState.spot_type,
+      };
+
+      const { adjusted, factors } = adjustStrategy(lookup.strategy, ctx);
+
+      let finalStrategy = adjusted;
+      if (isMultiway) {
+        const { adjusted: mwAdj } = applyMultiwayAdjust(adjusted, parsedState);
+        finalStrategy = mwAdj;
+      }
+
+      const best = bestAction(finalStrategy);
+      const pushFold = stackBB <= 15;
+      let sizeBB = 0;
+      if (best !== "fold") {
+        if (parsedState.pot_type === "4BP")
+          sizeBB = pushFold ? stackBB : Math.round(stackBB * 0.8);
+        else if (parsedState.pot_type === "3BP")
+          sizeBB = pushFold ? stackBB : 7.5;
+        else sizeBB = pushFold ? stackBB : 2.5;
+      }
+
+      range[hand] = {
+        action: best,
+        freq: finalStrategy[best] ?? 1,
+        sizeBB,
+        pushFoldMode: pushFold,
+        strategy: lookup.strategy,
+        adjusted_strategy: finalStrategy,
+        factors,
+        fallback: lookup.fallback ?? false,
+      };
+    }
+  }
+
+  res.json({ range, parsed_state: parsedState, elapsed_ms: Date.now() - t0 });
 });
 
 /**
