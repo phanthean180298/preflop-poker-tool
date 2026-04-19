@@ -980,7 +980,8 @@ function getStripBetLevel(upToPos) {
   for (const pos of state.positions) {
     if (pos === upToPos) break;
     const act = state.multiway.actions[pos];
-    if (act === "raise" || act === "limp") level = Math.max(level, act === "raise" ? 1 : 0);
+    if (act === "raise" || act === "limp")
+      level = Math.max(level, act === "raise" ? 1 : 0);
     if (act === "allin") level = Math.max(level, 1);
     if (act === "3bet") level = Math.max(level, 2);
     if (act === "4bet") level = Math.max(level, 3);
@@ -998,32 +999,32 @@ function getStripActions(pos) {
 
   if (level === 0) {
     return [
-      { key: "fold",  label: "Fold" },
-      { key: "limp",  label: "Limp" },
+      { key: "fold", label: "Fold" },
+      { key: "limp", label: "Limp" },
       { key: "raise", label: `Raise ${rfi}` },
       { key: "allin", label: `All-in ${stack}` },
     ];
   }
   if (level === 1) {
     return [
-      { key: "fold",  label: "Fold" },
-      { key: "call",  label: "Call" },
-      { key: "3bet",  label: `3bet ${tbet}` },
+      { key: "fold", label: "Fold" },
+      { key: "call", label: "Call" },
+      { key: "3bet", label: `3bet ${tbet}` },
       { key: "allin", label: `All-in ${stack}` },
     ];
   }
   if (level === 2) {
     return [
-      { key: "fold",  label: "Fold" },
-      { key: "call",  label: "Call" },
-      { key: "4bet",  label: `4bet ${fbet}` },
+      { key: "fold", label: "Fold" },
+      { key: "call", label: "Call" },
+      { key: "4bet", label: `4bet ${fbet}` },
       { key: "allin", label: `All-in ${stack}` },
     ];
   }
   // level >= 3
   return [
-    { key: "fold",  label: "Fold" },
-    { key: "call",  label: "Call" },
+    { key: "fold", label: "Fold" },
+    { key: "call", label: "Call" },
     { key: "allin", label: `All-in ${stack}` },
   ];
 }
@@ -1073,66 +1074,78 @@ function buildSeqForPosition(targetPos) {
 function renderActionSeqStrip() {
   const bar = document.getElementById("actionSeqBar");
   if (!bar) return;
-  if (!state.multiway.active) { bar.style.display = "none"; return; }
+  if (!state.multiway.active) {
+    bar.style.display = "none";
+    return;
+  }
   bar.style.display = "";
 
   const heroPos = state.position;
   const heroIdx = state.positions.indexOf(heroPos);
 
-  const cards = state.positions.map((pos, i) => {
-    const isHero = pos === heroPos;
-    const isAfter = i > heroIdx;
-    const selectedAct = state.multiway.actions[pos];
+  const cards = state.positions
+    .map((pos, i) => {
+      const isHero = pos === heroPos;
+      const isAfter = i > heroIdx;
+      const selectedAct = state.multiway.actions[pos];
 
-    if (isHero) {
-      // Show what GTO says for hero if a hand is selected
-      const rd = state.rangeCache[rangeKey()];
-      const heroHand = state.selectedHand;
-      const heroD = rd && heroHand ? rd[heroHand] : null;
-      const heroAdvice = heroD
-        ? `<div class="aseq-hero-advice ${heroD.action}">${heroD.action.toUpperCase()} ${Math.round((heroD.freq ?? 1) * 100)}%</div>`
-        : "";
-      return `
+      if (isHero) {
+        // Show what GTO says for hero if a hand is selected
+        const rd = state.rangeCache[rangeKey()];
+        const heroHand = state.selectedHand;
+        const heroD = rd && heroHand ? rd[heroHand] : null;
+        const heroAdvice = heroD
+          ? `<div class="aseq-hero-advice ${
+              heroD.action
+            }">${heroD.action.toUpperCase()} ${Math.round(
+              (heroD.freq ?? 1) * 100
+            )}%</div>`
+          : "";
+        return `
         <div class="aseq-card hero" data-pos="${pos}">
           <div class="aseq-pos-name">${pos}</div>
           <div class="aseq-stack">${state.stackBB}bb</div>
           <div class="aseq-hero-marker">HERO</div>
           ${heroAdvice}
         </div>`;
-    }
+      }
 
-    const actions = getStripActions(pos);
-    const actionBtns = actions
-      .map((a) => {
-        const isSel = selectedAct === a.key;
-        const cls = `aseq-btn${isSel ? " selected" : ""} ${a.key}`;
-        return `<button class="${cls}" data-pos="${pos}" data-act="${a.key}">${a.label}</button>`;
-      })
-      .join("");
+      const actions = getStripActions(pos);
+      const actionBtns = actions
+        .map((a) => {
+          const isSel = selectedAct === a.key;
+          const cls = `aseq-btn${isSel ? " selected" : ""} ${a.key}`;
+          return `<button class="${cls}" data-pos="${pos}" data-act="${a.key}">${a.label}</button>`;
+        })
+        .join("");
 
-    let cardCls = "aseq-card";
-    if (isAfter) cardCls += " future";
-    if (selectedAct === "fold") cardCls += " folded";
-    else if (selectedAct) cardCls += " acted";
+      let cardCls = "aseq-card";
+      if (isAfter) cardCls += " future";
+      if (selectedAct === "fold") cardCls += " folded";
+      else if (selectedAct) cardCls += " acted";
 
-    return `
+      return `
       <div class="${cardCls}" data-pos="${pos}">
         <div class="aseq-pos-name">${pos}</div>
         <div class="aseq-stack">${state.stackBB}bb</div>
         <div class="aseq-actions">${actionBtns}</div>
       </div>`;
-  }).join("");
+    })
+    .join("");
 
   // Summarize the current sequence
   const seqParts = state.positions
     .filter((p) => state.multiway.actions[p])
     .map((p) => {
       const a = state.multiway.actions[p];
-      const color = a === "fold" ? "#4a5580" : a === "call" ? "#3c8fe8" : "#e83c3c";
+      const color =
+        a === "fold" ? "#4a5580" : a === "call" ? "#3c8fe8" : "#e83c3c";
       return `<span style="color:${color}">${p} <b>${a}</b></span>`;
     });
   const seqLabel = seqParts.length
-    ? `${seqParts.join(" → ")} → <span style="color:#00e8b0">${heroPos} ?</span>`
+    ? `${seqParts.join(
+        " → "
+      )} → <span style="color:#00e8b0">${heroPos} ?</span>`
     : `<span style="color:var(--muted)">Set actions below to define the sequence</span>`;
 
   bar.innerHTML = `
@@ -1251,7 +1264,11 @@ function openPositions() {
 
 async function fetchAllPositions(hand) {
   const mwSuffix = state.multiway.active
-    ? "|mw:" + Object.entries(state.multiway.actions).sort().map(([p, a]) => `${p}:${a}`).join(",")
+    ? "|mw:" +
+      Object.entries(state.multiway.actions)
+        .sort()
+        .map(([p, a]) => `${p}:${a}`)
+        .join(",")
     : "";
   const cacheKey = `pos:${hand}:${state.scenario}:${state.vsPosition}:${state.stackBB}:${state.tournament.stage}${mwSuffix}`;
   if (state.positionCache[cacheKey]) return state.positionCache[cacheKey];

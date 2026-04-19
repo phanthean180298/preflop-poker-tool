@@ -426,10 +426,17 @@ router.post("/action", (req, res) => {
 
   const best = bestAction(finalStrategy);
 
-  const actionSizing = computeActionSizing(
+  const _rawSizing = computeActionSizing(
     lookup.spot,
     lookup.stackProfile ?? stack_bb
   );
+  // Only include sizing labels for actions that actually exist in the CFR strategy
+  const strategyKeys = new Set(Object.keys(lookup.strategy || {}));
+  const actionSizing = _rawSizing
+    ? Object.fromEntries(
+        Object.entries(_rawSizing).filter(([k]) => strategyKeys.has(k))
+      )
+    : null;
 
   const result = {
     spot: lookup.spot,
