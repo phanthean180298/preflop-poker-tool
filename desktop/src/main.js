@@ -1080,7 +1080,21 @@ function renderActionSeqStrip() {
   }
   bar.style.display = "";
 
-  const heroPos = state.position;
+  // ── Auto-detect Hero: first position with no assigned action ──────────────
+  const autoHero =
+    state.positions.find((p) => !state.multiway.actions[p]) ??
+    state.positions[state.positions.length - 1];
+
+  // Sync state.position so API calls use the correct hero
+  if (state.position !== autoHero) {
+    state.position = autoHero;
+    // Update pos-tab highlight
+    document
+      .querySelectorAll(".pos-tab")
+      .forEach((t) => t.classList.toggle("active", t.dataset.pos === autoHero));
+  }
+
+  const heroPos = autoHero;
   const heroIdx = state.positions.indexOf(heroPos);
 
   const cards = state.positions
@@ -1165,21 +1179,20 @@ function renderActionSeqStrip() {
       } else {
         state.multiway.actions[pos] = act;
       }
-      renderActionSeqStrip();
-      // Invalidate cache and reload
+      // Hero auto-advances — invalidate all caches
       state.positionCache = {};
-      const key = rangeKey();
-      delete state.rangeCache[key];
-      if (state.multiway.active) loadFullRange();
+      state.rangeCache = {};
+      renderActionSeqStrip();
+      loadFullRange();
     });
   });
 
   bar.querySelector("#clearSeqBtn")?.addEventListener("click", () => {
     state.multiway.actions = {};
     state.positionCache = {};
-    delete state.rangeCache[rangeKey()];
+    state.rangeCache = {};
     renderActionSeqStrip();
-    if (state.multiway.active) loadFullRange();
+    loadFullRange();
   });
 }
 
