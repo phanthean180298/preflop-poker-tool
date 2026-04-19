@@ -38,18 +38,37 @@ from core.game import ALL_HANDS, ALL_PAIRS, ALL_SPOT_NAMES
 from core.game import rfi_spot, vs_rfi_spot, vs_3bet_spot, vs_4bet_spot
 from core.cfr  import CFRSolver
 
-# ─── Spot → action mapping ────────────────────────────────────────────────────
+# ─── Spot → action mapping (stack-aware) ─────────────────────────────────────
 
-def _build_schema() -> dict[str, list[str]]:
+def build_schema(stack_bb: float = 100.0) -> dict[str, list[str]]:
+    """
+    Build spot→actions schema for a given effective stack.
+    At push/fold depths (rfi_allin) vs_rfi loses the 3bet option.
+    When 3bet is a near-shove (tbet_allin) vs_3bet loses the 4bet option.
+    """
+    from core.game import get_spot_params
     schema: dict[str, list[str]] = {}
+    seen_allin: bool | None = None  # sanity — all pairs consistent at same stack
     for opener, facing in ALL_PAIRS:
-        schema[rfi_spot(opener)]            = ["raise", "fold"]
-        schema[vs_rfi_spot(facing, opener)] = ["fold",  "call", "3bet"]
-        schema[vs_3bet_spot(opener, facing)]= ["fold",  "call", "4bet"]
-        schema[vs_4bet_spot(facing, opener)]= ["fold",  "call"]
+        p = get_spot_params(opener, facing, stack_bb)
+        rfi_allin  = p["rfi_allin"]
+        tbet_allin = p["tbet_allin"]
+
+        schema[rfi_spot(opener)] = ["raise", "fold"]
+
+        if rfi_allin:
+            schema[vs_rfi_spot(facing, opener)] = ["fold", "call"]
+        else:
+            schema[vs_rfi_spot(facing, opener)] = ["fold", "call", "3bet"]
+            if tbet_allin:
+                schema[vs_3bet_spot(opener, facing)] = ["fold", "call"]
+            else:
+                schema[vs_3bet_spot(opener, facing)] = ["fold", "call", "4bet"]
+                schema[vs_4bet_spot(facing, opener)] = ["fold", "call"]
     return schema
 
-SCHEMA: dict[str, list[str]] = _build_schema()
+# Legacy default schema (100BB)
+SCHEMA: dict[str, list[str]] = build_schema(100.0)
 
 # ─── Validation ───────────────────────────────────────────────────────────────
 
@@ -137,21 +156,27 @@ def _update_version_manifest(new_version: str, bench: dict) -> None:
 
 
 def export_strategies(solver: CFRSolver, bench: dict,
-                      version=None):  # -> Path
+                      version=None,
+                      stack_bb: float = 100.0):  # -> Path
     """
     Extract average strategies from solver, validate, compress, and write
-    versioned output.  Returns path to the written file.
+    versioned output.
+
+    Output path: output/{version}/stack_{stack_bb:.0f}/preflop_strategies.json
+    Returns path to the written file.
     """
     version = version or _next_version()
-    out_dir = OUTPUT_ROOT / version
+    out_dir = OUTPUT_ROOT / version / f"stack_{stack_bb:.0f}"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "preflop_strategies.json"
 
-    # ── 1. Extract raw strategies ──────────────────────────────────────────────
-    print("\n[export] Extracting average strategies...")
+    # ── 1. Build stack-aware schema ────────────────────────────────────────────
+    schema = build_schema(stack_bb)
+
+    # ── 2. Extract raw strategies ──────────────────────────────────────────────
+    print(f"\n[export] Extracting strategies (stack={stack_bb:.0f}BB)...")
     t0 = time.perf_counter()
 
-    schema = SCHEMA
     raw: dict[str, dict[str, list[float]]] = {}
 
     for spot, actions in schema.items():
@@ -183,10 +208,11 @@ def export_strategies(solver: CFRSolver, bench: dict,
         print("         OK — all spots/hands valid, probabilities sum to 1.0")
 
     # ── 3. Build compact payload ───────────────────────────────────────────────
-    bench.update({"spots": len(raw), "hands": len(ALL_HANDS)})
+    bench.update({"spots": len(raw), "hands": len(ALL_HANDS), "stack_bb": stack_bb})
 
     payload = {
         "version":      version,
+        "stack_bb":     stack_bb,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "iterations":   bench.get("iterations"),
         "train_time_s": bench.get("train_time_s"),

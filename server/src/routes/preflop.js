@@ -3,6 +3,10 @@ const router = express.Router();
 const { query, TABLE_POSITIONS } = require("../engine/preflop");
 const { lookupStrategy, loaderStats } = require("../engine/cfr_loader");
 const { adjustStrategy, bestAction } = require("../engine/ev");
+const {
+  parseActionSequence,
+  applyMultiwayAdjust,
+} = require("../engine/multiway");
 const { makeCacheKey, getCached, setCache } = require("../middleware/cache");
 const { logAction, getLogStats } = require("../middleware/logger");
 
@@ -202,6 +206,9 @@ router.post("/action", (req, res) => {
   const t0 = Date.now();
 
   const {
+    // multiway action sequence (new)
+    action_sequence,
+    table_size: reqTableSize,
     // compressed state
     hero_pos,
     villain_pos,
@@ -229,10 +236,32 @@ router.post("/action", (req, res) => {
     return res.status(400).json({ error: "Missing required field: hand" });
   }
 
-  // Resolve position params: compressed state takes precedence
-  const resolvedPos = hero_pos || position || null;
-  const resolvedVs = villain_pos || vs || vs_position || null;
-  const resolvedFacing = spot_type || facing || null;
+  // ── Parse action_sequence if provided ────────────────────────────────────
+  let parsedState = null;
+  if (Array.isArray(action_sequence) && action_sequence.length > 0) {
+    try {
+      parsedState = parseActionSequence(
+        action_sequence,
+        Number(reqTableSize) || 6
+      );
+    } catch (e) {
+      return res
+        .status(400)
+        .json({ error: `action_sequence error: ${e.message}` });
+    }
+  }
+
+  // Resolve position params: action_sequence > compressed state > legacy
+  const resolvedPos =
+    (parsedState && parsedState.hero_pos) || hero_pos || position || null;
+  const resolvedVs =
+    (parsedState && parsedState.aggressor_pos) ||
+    villain_pos ||
+    vs ||
+    vs_position ||
+    null;
+  const resolvedFacing =
+    (parsedState && parsedState.spot_type) || spot_type || facing || null;
 
   const lookup = lookupStrategy({
     spot,
@@ -240,6 +269,7 @@ router.post("/action", (req, res) => {
     vs: resolvedVs,
     facing: resolvedFacing,
     hand,
+    stackBB: Number(stack_bb),
   });
 
   if (lookup.error) {
@@ -279,18 +309,34 @@ router.post("/action", (req, res) => {
   };
 
   const { adjusted, factors } = adjustStrategy(lookup.strategy, ctx);
-  const best = bestAction(adjusted);
+
+  // ── Multiway adjustment (on top of tournament adjust) ─────────────────────
+  let finalStrategy = adjusted;
+  let multiwayFactors = null;
+  if (
+    parsedState &&
+    (parsedState.callers_count > 0 || parsedState.pot_type !== "SRP")
+  ) {
+    const mw = applyMultiwayAdjust(adjusted, parsedState);
+    finalStrategy = mw.adjusted;
+    multiwayFactors = mw.multiway_factors;
+  }
+
+  const best = bestAction(finalStrategy);
 
   const result = {
     spot: lookup.spot,
     hand: lookup.hand,
     strategy: lookup.strategy,
-    adjusted_strategy: adjusted,
+    adjusted_strategy: finalStrategy,
     best_action: best,
     factors,
+    stack_profile: lookup.stackProfile ?? 100,
     fallback: lookup.fallback ?? false,
   };
   if (lookup.warning) result.warning = lookup.warning;
+  if (multiwayFactors) result.multiway_factors = multiwayFactors;
+  if (parsedState) result.parsed_state = parsedState;
 
   logAction(req, result, Date.now() - t0, req.body);
   res.json(result);

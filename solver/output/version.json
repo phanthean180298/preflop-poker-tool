@@ -1,5 +1,5 @@
 {
-  "current": "v9",
+  "current": "v10",
   "versions": [
     "v2",
     "v3",
@@ -137,6 +137,70 @@
       "created": "2026-04-19T09:20:17.628162+00:00",
       "iterations": 2000000,
       "train_time_s": 13.05,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v10",
+      "created": "2026-04-19T09:41:30.462408+00:00",
+      "iterations": 2000000,
+      "train_time_s": 8.7,
+      "spots": 35,
+      "hands": 169
+    },
+    {
+      "version": "v10",
+      "created": "2026-04-19T09:41:45.059890+00:00",
+      "iterations": 2000000,
+      "train_time_s": 14.51,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v10",
+      "created": "2026-04-19T09:41:58.877464+00:00",
+      "iterations": 2000000,
+      "train_time_s": 13.72,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v10",
+      "created": "2026-04-19T09:42:11.389464+00:00",
+      "iterations": 2000000,
+      "train_time_s": 12.42,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v10",
+      "created": "2026-04-19T09:42:24.233143+00:00",
+      "iterations": 2000000,
+      "train_time_s": 12.75,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v10",
+      "created": "2026-04-19T09:42:39.194434+00:00",
+      "iterations": 2000000,
+      "train_time_s": 14.86,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v10",
+      "created": "2026-04-19T09:42:54.876054+00:00",
+      "iterations": 2000000,
+      "train_time_s": 15.58,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v10",
+      "created": "2026-04-19T09:43:10.820472+00:00",
+      "iterations": 2000000,
+      "train_time_s": 15.83,
       "spots": 91,
       "hands": 169
     }

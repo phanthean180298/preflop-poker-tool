@@ -23,16 +23,17 @@ const VERSION_FILE = path.join(SOLVER_OUTPUT, "version.json");
 
 // ─── In-memory state ─────────────────────────────────────────────────────────
 
-/** @type {Map<string, Object>|null} Flat lookup map "spot:hand" → strategy */
-let _lookup = null;
-/** @type {Object|null} Full parsed JSON (schema + data) */
-let _raw = null;
-/** @type {string|null} Currently loaded version tag */
+/**
+ * Multi-stack profiles:
+ *   _profiles[stackBB] = Map<"spot:hand", strategy>
+ *   _raws[stackBB]     = raw JSON object
+ *
+ * Falls back to legacy single-file format (100BB only).
+ */
+let _profiles = {}; // { 15: Map, 20: Map, 25: Map, ... }
+let _raws = {}; // { 15: raw, 20: raw, ... }
 let _version = null;
-/** Load time in ms */
 let _loadMs = 0;
-/** Number of entries in the map */
-let _entries = 0;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -180,6 +181,8 @@ function _buildLookupMap(raw) {
 
 /**
  * Load strategies from a version tag (null = read from version.json).
+ * Automatically detects multi-stack subdirs (stack_15/, stack_30/, …) and
+ * falls back to legacy single-file format for older versions.
  * Returns true on success.
  */
 function loadVersion(tag = null) {
@@ -205,39 +208,78 @@ function loadVersion(tag = null) {
     }
   }
 
-  const stratFile = path.join(
-    SOLVER_OUTPUT,
-    version,
-    "preflop_strategies.json"
-  );
-  if (!fs.existsSync(stratFile)) {
-    console.warn(`[cfr_loader] Strategy file not found: ${stratFile}`);
+  const vDir = path.join(SOLVER_OUTPUT, version);
+  if (!fs.existsSync(vDir)) {
+    console.warn(`[cfr_loader] Version directory not found: ${vDir}`);
     return false;
   }
 
   const t0 = Date.now();
-  let raw;
+  const newProfiles = {};
+  const newRaws = {};
+
+  // ── Try multi-stack subdirs first ─────────────────────────────────────────
+  let found = false;
   try {
-    raw = JSON.parse(fs.readFileSync(stratFile, "utf8"));
-  } catch (e) {
-    console.error("[cfr_loader] Failed to parse strategy file:", e.message);
-    return false;
+    for (const entry of fs.readdirSync(vDir)) {
+      const m = entry.match(/^stack_(\d+)$/);
+      if (!m) continue;
+      const stackBB = parseInt(m[1], 10);
+      const stratFile = path.join(vDir, entry, "preflop_strategies.json");
+      if (!fs.existsSync(stratFile)) continue;
+      try {
+        const raw = JSON.parse(fs.readFileSync(stratFile, "utf8"));
+        newProfiles[stackBB] = _buildLookupMap(raw);
+        newRaws[stackBB] = raw;
+        found = true;
+      } catch (e) {
+        console.warn(`[cfr_loader] Failed to load ${stratFile}: ${e.message}`);
+      }
+    }
+  } catch (_) {}
+
+  // ── Fall back to legacy single-file format ─────────────────────────────────
+  if (!found) {
+    const stratFile = path.join(vDir, "preflop_strategies.json");
+    if (!fs.existsSync(stratFile)) {
+      console.warn(`[cfr_loader] No strategy files found in: ${vDir}`);
+      return false;
+    }
+    try {
+      const raw = JSON.parse(fs.readFileSync(stratFile, "utf8"));
+      newProfiles[100] = _buildLookupMap(raw);
+      newRaws[100] = raw;
+    } catch (e) {
+      console.error("[cfr_loader] Failed to parse strategy file:", e.message);
+      return false;
+    }
   }
 
-  const map = _buildLookupMap(raw);
-
-  _raw = raw;
-  _lookup = map;
+  _profiles = newProfiles;
+  _raws = newRaws;
   _version = version;
   _loadMs = Date.now() - t0;
-  _entries = map.size;
 
+  const stackList = Object.keys(_profiles)
+    .sort((a, b) => +a - +b)
+    .join(", ");
+  const totalEntries = Object.values(_profiles).reduce((s, m) => s + m.size, 0);
   console.log(
     `[cfr_loader] Loaded version=${version}  ` +
-      `spots=${raw.spots}  hands=${raw.hands}  ` +
-      `entries=${map.size}  load=${_loadMs}ms`
+      `stacks=[${stackList}]BB  ` +
+      `total_entries=${totalEntries}  load=${_loadMs}ms`
   );
   return true;
+}
+
+// ─── Closest stack profile ────────────────────────────────────────────────────
+
+function _closestStack(stackBB) {
+  const keys = Object.keys(_profiles).map(Number);
+  if (keys.length === 0) return null;
+  return keys.reduce((best, k) =>
+    Math.abs(k - stackBB) < Math.abs(best - stackBB) ? k : best
+  );
 }
 
 // Eager load on require
@@ -294,9 +336,10 @@ startWatcher();
  * @param {string} [opts.vs]        Opponent position e.g. "BB"
  * @param {string} [opts.facing]    "rfi" | "vs_rfi" | "3bet" | "4bet" | null
  * @param {string}  opts.hand       Hand class e.g. "AKs", "AA"
- * @returns {{ spot, hand, strategy, fallback? } | { error }}
+ * @param {number} [opts.stackBB]   Effective stack in BB (picks closest profile, default 100)
+ * @returns {{ spot, hand, strategy, stackProfile?, fallback? } | { error }}
  */
-function lookupStrategy({ spot, position, vs, facing, hand }) {
+function lookupStrategy({ spot, position, vs, facing, hand, stackBB = 100 }) {
   const resolvedSpot = spot || resolveSpot(position, vs, facing);
   if (!resolvedSpot) {
     return {
@@ -309,10 +352,18 @@ function lookupStrategy({ spot, position, vs, facing, hand }) {
     return { error: `Invalid hand: ${hand}` };
   }
 
-  if (_lookup) {
-    const strategy = _lookup.get(`${resolvedSpot}:${normalHand}`);
+  const profileKeys = Object.keys(_profiles).map(Number);
+  if (profileKeys.length > 0) {
+    const closestStack = _closestStack(stackBB);
+    const map = _profiles[closestStack];
+    const strategy = map && map.get(`${resolvedSpot}:${normalHand}`);
     if (strategy) {
-      return { spot: resolvedSpot, hand: normalHand, strategy };
+      return {
+        spot: resolvedSpot,
+        hand: normalHand,
+        strategy,
+        stackProfile: closestStack,
+      };
     }
   }
 
@@ -322,23 +373,30 @@ function lookupStrategy({ spot, position, vs, facing, hand }) {
     hand: normalHand,
     strategy: fallbackStrategy(resolvedSpot, normalHand),
     fallback: true,
-    warning: _lookup
-      ? `Spot/hand not in CFR data (${resolvedSpot}:${normalHand}), using heuristic fallback.`
-      : "CFR data not loaded, using heuristic fallback.",
+    warning:
+      profileKeys.length > 0
+        ? `Spot/hand not in CFR data (${resolvedSpot}:${normalHand}), using heuristic fallback.`
+        : "CFR data not loaded, using heuristic fallback.",
   };
 }
 
 /** Returns loader health stats (for /health or monitoring). */
 function loaderStats() {
+  const stacks = Object.keys(_profiles)
+    .map(Number)
+    .sort((a, b) => a - b);
+  const totalEntries = Object.values(_profiles).reduce((s, m) => s + m.size, 0);
+  const firstRaw = stacks.length > 0 ? _raws[stacks[0]] : null;
   return {
-    loaded: _lookup !== null,
+    loaded: stacks.length > 0,
     version: _version,
-    entries: _entries,
+    stacks,
+    entries: totalEntries,
     load_ms: _loadMs,
-    spots: _raw?.spots ?? 0,
-    hands: _raw?.hands ?? 0,
-    generated_at: _raw?.generated_at ?? null,
-    iterations: _raw?.iterations ?? null,
+    spots: firstRaw?.spots ?? 0,
+    hands: firstRaw?.hands ?? 0,
+    generated_at: firstRaw?.generated_at ?? null,
+    iterations: firstRaw?.iterations ?? null,
   };
 }
 

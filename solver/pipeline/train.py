@@ -86,7 +86,7 @@ def _load_warm_start(solver: CFRSolver) -> int:
 
 def _worker(args: tuple) -> CFRSolver:
     """Train a shard of iterations in a subprocess. Returns solver state."""
-    shard_iters, seed, offset = args
+    shard_iters, seed, offset, stack_bb = args
     # Load equity table in this worker (reads from cache file, ~10ms)
     from core.equity_table import ensure_table
     ensure_table(verbose=False)
@@ -100,7 +100,8 @@ def _worker(args: tuple) -> CFRSolver:
         opener, facing = ALL_PAIRS[pair_idx]
         opener_hand    = random.choices(ALL_HANDS, weights=HAND_WEIGHTS, k=1)[0]
         facing_hand    = random.choices(ALL_HANDS, weights=HAND_WEIGHTS, k=1)[0]
-        cfr_game(solver, opener, facing, opener_hand, facing_hand, t)
+        cfr_game(solver, opener, facing, opener_hand, facing_hand, t,
+                 stack_bb=stack_bb)
     solver.iterations = shard_iters
     return solver
 
@@ -109,12 +110,14 @@ def _worker(args: tuple) -> CFRSolver:
 
 def train(iterations: int, seed: int = 42,
           workers: int = 0,
-          warm_start: bool = True) -> tuple[CFRSolver, dict]:
+          warm_start: bool = True,
+          stack_bb: float = 100.0) -> tuple[CFRSolver, dict]:
     """
-    Train CFR+ over all position pairs.
+    Train CFR+ over all position pairs for a given effective stack depth.
 
+    stack_bb: effective stack in BB (selects sizing + action set from game tree)
     warm_start: if True, load previous version's strategy_sum as starting point
-                → each run accumulates on top of the last → monotonically improves
+                → each run accumulates on top of the last
     Workers:
       0  → auto (use all CPU cores)
       1  → single-process (easier to debug)
@@ -140,10 +143,11 @@ def train(iterations: int, seed: int = 42,
         "seed":             seed,
         "workers":          n_workers,
         "warm_start_iters": t_offset,
+        "stack_bb":         stack_bb,
     }
 
     print(f"Training DCFR+  [{iterations:,} new iters | {total_iters:,} cumulative | "
-          f"{n_pairs} pairs | {n_workers} worker(s) | seed={seed}]")
+          f"{n_pairs} pairs | {n_workers} worker(s) | stack={stack_bb:.0f}BB | seed={seed}]")
     print(f"  Effective new iters/pair: ~{iterations // n_pairs:,}")
 
     if n_workers == 1:
@@ -155,7 +159,8 @@ def train(iterations: int, seed: int = 42,
             opener, facing = ALL_PAIRS[pair_idx]
             opener_hand = random.choices(ALL_HANDS, weights=HAND_WEIGHTS, k=1)[0]
             facing_hand = random.choices(ALL_HANDS, weights=HAND_WEIGHTS, k=1)[0]
-            cfr_game(solver, opener, facing, opener_hand, facing_hand, t)
+            cfr_game(solver, opener, facing, opener_hand, facing_hand, t,
+                     stack_bb=stack_bb)
             if local_t % checkpoint == 0:
                 now  = time.perf_counter()
                 rate = checkpoint / (now - t_last)
@@ -170,7 +175,7 @@ def train(iterations: int, seed: int = 42,
         offset = t_offset
         for i in range(n_workers):
             n = shard + (1 if i < remainder else 0)
-            tasks.append((n, seed + i, offset))
+            tasks.append((n, seed + i, offset, stack_bb))
             offset += n
 
         print(f"  Spawning {n_workers} workers (~{shard:,} iters each)…", flush=True)
@@ -222,7 +227,7 @@ def reload_server() -> None:
 # ─── Watch mode ───────────────────────────────────────────────────────────────
 
 def watch_loop(iterations: int, seed: int, workers: int,
-               interval_minutes: int) -> None:
+               interval_minutes: int, stack_bb: float = 100.0) -> None:
     """Continuously re-train and export every N minutes, accumulating on previous runs."""
     run = 0
     while True:
@@ -230,8 +235,9 @@ def watch_loop(iterations: int, seed: int, workers: int,
         print(f"\n{'='*60}")
         print(f"Watch run #{run}  ({time.strftime('%H:%M:%S')})")
         print(f"{'='*60}")
-        solver, bench = train(iterations, seed + run, workers, warm_start=True)
-        export_strategies(solver, bench)
+        solver, bench = train(iterations, seed + run, workers,
+                              warm_start=True, stack_bb=stack_bb)
+        export_strategies(solver, bench, stack_bb=stack_bb)
         reload_server()
         print(f"  Next run in {interval_minutes}m  (Ctrl+C to stop)", flush=True)
         time.sleep(interval_minutes * 60)
@@ -240,6 +246,8 @@ def watch_loop(iterations: int, seed: int, workers: int,
 # ─── CLI ─────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    from core.game import STACK_PROFILES
+
     parser = argparse.ArgumentParser(description="Train preflop DCFR+ solver")
     parser.add_argument("--iterations", type=int, default=2_000_000)
     parser.add_argument("--seed",    type=int, default=42)
@@ -256,6 +264,14 @@ def main() -> None:
                         help="Only precompute equity table, then exit")
     parser.add_argument("--equity-samples", type=int, default=500,
                         help="MC samples per matchup for equity table (default: 500)")
+    parser.add_argument("--stack-profile", type=int, default=100,
+                        metavar="BB",
+                        help="Effective stack depth in BB to train (default: 100). "
+                             "One of: " + ", ".join(str(s) for s in STACK_PROFILES))
+    parser.add_argument("--all-stacks", action="store_true",
+                        help="Train ALL stack profiles sequentially "
+                             f"({', '.join(str(s) for s in STACK_PROFILES)} BB). "
+                             "Each profile is trained independently (no warm-start across stacks).")
     args = parser.parse_args()
 
     # ── Equity table (precompute once, cached forever) ────────────────────────
@@ -266,12 +282,50 @@ def main() -> None:
         return   # done
 
     if args.watch > 0:
-        watch_loop(args.iterations, args.seed, args.workers, args.watch)
+        watch_loop(args.iterations, args.seed, args.workers, args.watch,
+                   stack_bb=float(args.stack_profile))
         return
 
-    solver, bench = train(args.iterations, args.seed, args.workers,
-                          warm_start=not args.no_warm_start)
-    export_strategies(solver, bench, version=args.version)
+    # Determine which stack profiles to train
+    if args.all_stacks:
+        profiles_to_train = STACK_PROFILES
+    else:
+        stk = args.stack_profile
+        if stk not in STACK_PROFILES:
+            print(f"WARNING: {stk}BB not in standard profiles {STACK_PROFILES}. "
+                  "Training anyway.")
+        profiles_to_train = [stk]
+
+    # Determine version once (shared across all stack profiles)
+    from pipeline.export import _next_version, _update_version_manifest, OUTPUT_ROOT
+    version = args.version or _next_version()
+
+    total_stacks = len(profiles_to_train)
+    for i, stk in enumerate(profiles_to_train):
+        print(f"\n{'='*60}")
+        print(f"Stack profile {i+1}/{total_stacks}: {stk}BB")
+        print(f"{'='*60}")
+
+        solver, bench = train(
+            args.iterations, args.seed, args.workers,
+            warm_start=(not args.no_warm_start) and (total_stacks == 1),
+            stack_bb=float(stk),
+        )
+        export_strategies(solver, bench, version=version, stack_bb=float(stk))
+
+    # Update version manifest once after all profiles done
+    if not args.no_warm_start or total_stacks > 1:
+        from pipeline.export import VERSION_FILE
+        import json as _json
+        if VERSION_FILE.exists():
+            meta = _json.loads(VERSION_FILE.read_text())
+        else:
+            meta = {"current": None, "versions": [], "history": []}
+        meta["current"] = version
+        if version not in meta.get("versions", []):
+            meta.setdefault("versions", []).append(version)
+        VERSION_FILE.write_text(_json.dumps(meta, indent=2))
+        print(f"\n[train] Version manifest updated: current = {version}")
 
     if args.reload:
         reload_server()
