@@ -243,6 +243,46 @@ function loadVersion(tag = null) {
 // Eager load on require
 loadVersion();
 
+// ─── Auto hot-reload on SIGUSR1 or file change ────────────────────────────────
+
+let _watcher = null;
+
+/**
+ * Watch the current strategy file and reload when it changes.
+ * Also triggers on SIGUSR1 (sent by train.py --reload).
+ */
+function startWatcher() {
+  if (_watcher) return;
+
+  // Handle SIGUSR1 → immediate reload
+  process.on("SIGUSR1", () => {
+    console.log("[cfr_loader] SIGUSR1 received — reloading strategies…");
+    loadVersion();
+  });
+
+  // Watch VERSION_FILE for changes (train.py writes this last)
+  if (fs.existsSync(VERSION_FILE)) {
+    try {
+      _watcher = fs.watch(VERSION_FILE, { persistent: false }, (event) => {
+        if (event === "change") {
+          // Debounce: wait 200ms for file writes to settle
+          if (_watcher._debounce) clearTimeout(_watcher._debounce);
+          _watcher._debounce = setTimeout(() => {
+            console.log(
+              "[cfr_loader] version.json changed — reloading strategies…"
+            );
+            loadVersion();
+          }, 200);
+        }
+      });
+    } catch (_) {
+      // fs.watch not available in all environments — silent fallback
+    }
+  }
+}
+
+startWatcher();
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**

@@ -1,7 +1,15 @@
 {
-  "current": "v2",
+  "current": "v9",
   "versions": [
-    "v2"
+    "v2",
+    "v3",
+    "v4",
+    "v5",
+    "v6",
+    "v7",
+    "v8",
+    "v9",
+    "v10"
   ],
   "history": [
     {
@@ -9,6 +17,126 @@
       "created": "2026-04-19T05:10:50.785521+00:00",
       "iterations": 1000000,
       "train_time_s": 28.87,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v3",
+      "created": "2026-04-19T09:00:46.024527+00:00",
+      "iterations": 50000,
+      "train_time_s": 1.68,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v4",
+      "created": "2026-04-19T09:02:19.972702+00:00",
+      "iterations": 100000,
+      "train_time_s": 1.2,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v5",
+      "created": "2026-04-19T09:02:35.967630+00:00",
+      "iterations": 2000000,
+      "train_time_s": 13.72,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v6",
+      "created": "2026-04-19T09:02:50.399473+00:00",
+      "iterations": 500000,
+      "train_time_s": 25.09,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v7",
+      "created": "2026-04-19T09:02:56.911431+00:00",
+      "iterations": 2000000,
+      "train_time_s": 17.19,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v8",
+      "created": "2026-04-19T09:02:57.148350+00:00",
+      "iterations": 500000,
+      "train_time_s": 6.54,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v9",
+      "created": "2026-04-19T09:04:35.971579+00:00",
+      "iterations": 2000000,
+      "train_time_s": 13.77,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v10",
+      "created": "2026-04-19T09:05:51.733092+00:00",
+      "iterations": 2000000,
+      "train_time_s": 14.94,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v3",
+      "created": "2026-04-19T09:06:07.377777+00:00",
+      "iterations": 2000000,
+      "train_time_s": 13.89,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v4",
+      "created": "2026-04-19T09:08:19.980961+00:00",
+      "iterations": 2500000,
+      "train_time_s": 3.67,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v5",
+      "created": "2026-04-19T09:08:31.687467+00:00",
+      "iterations": 3000000,
+      "train_time_s": 3.46,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v6",
+      "created": "2026-04-19T09:08:43.212182+00:00",
+      "iterations": 3500000,
+      "train_time_s": 3.38,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v7",
+      "created": "2026-04-19T09:08:46.725478+00:00",
+      "iterations": 4000000,
+      "train_time_s": 3.33,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v8",
+      "created": "2026-04-19T09:08:50.283223+00:00",
+      "iterations": 4500000,
+      "train_time_s": 3.37,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v9",
+      "created": "2026-04-19T09:20:17.628162+00:00",
+      "iterations": 2000000,
+      "train_time_s": 13.05,
       "spots": 91,
       "hands": 169
     }

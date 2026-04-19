@@ -7,7 +7,11 @@
     "install:all": "cd server && npm install && cd ../desktop && npm install",
     "server": "cd server && npm run dev",
     "desktop": "cd desktop && NODE_ENV=development npm start",
-    "dev": "concurrently \"npm run server\" \"npm run desktop\""
+    "dev": "concurrently \"npm run server\" \"npm run desktop\"",
+    "equity": "python3 /Users/phanan/Documents/gto-demo/solver/pipeline/train.py --precompute-equity",
+    "train": "python3 /Users/phanan/Documents/gto-demo/solver/pipeline/train.py --iterations 2000000 --workers 0 --reload",
+    "train:fast": "python3 /Users/phanan/Documents/gto-demo/solver/pipeline/train.py --iterations 500000 --workers 0 --reload",
+    "train:watch": "python3 /Users/phanan/Documents/gto-demo/solver/pipeline/train.py --iterations 2000000 --workers 0 --watch 60"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
