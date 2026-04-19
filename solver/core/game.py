@@ -31,29 +31,57 @@ def is_ip(actor: str, villain: str) -> bool:
     """True if actor is in position vs villain postflop."""
     return _POSTFLOP_ORDER.get(actor, 0) > _POSTFLOP_ORDER.get(villain, 0)
 
+# ─── Stack profiles ────────────────────────────────────────────────────────────
+
+# Stack depths (in BB) for which we train separate CFR solutions.
+# Server picks the closest profile to the actual stack.
+STACK_PROFILES: list[int] = [15, 20, 25, 30, 40, 50, 75, 100]
+
 # ─── Sizing ────────────────────────────────────────────────────────────────────
 
-# Standard 8-max RFI sizes (bb)
-RFI_SIZES: dict[str, float] = {
-    "UTG": 2.5, "UTG1": 2.5, "MP": 2.5,
-    "HJ": 2.5,  "CO": 2.5,   "BTN": 2.5,
-    "SB": 3.0,
-}
+def _rfi_size(opener: str, stack_bb: float) -> float:
+    """
+    Open-raise size by position and effective stack.
+    At ≤15BB all opens are shoves (rfi_size = stack_bb).
+    """
+    if stack_bb <= 15:
+        return stack_bb          # shove
+    if stack_bb <= 20:
+        return 2.0
+    if stack_bb <= 35:
+        return 2.2               # slightly smaller for playability
+    # Deep stacks (40BB+)
+    return 3.0 if opener == "SB" else 2.5
 
-def get_3bet_size(rfi: float, three_bettor_ip: bool) -> float:
-    """IP 3bet = 3x RFI; OOP 3bet = 3.5x RFI."""
-    return round(rfi * (3.0 if three_bettor_ip else 3.5), 1)
+def get_3bet_size(rfi: float, three_bettor_ip: bool,
+                  stack_bb: float = 100.0) -> float:
+    """IP 3bet = 3x RFI; OOP 3bet = 3.5x RFI; capped at stack."""
+    natural = round(rfi * (3.0 if three_bettor_ip else 3.5), 1)
+    return min(natural, stack_bb)
 
-def get_4bet_size(tbet: float) -> float:
-    """Standard 4bet ≈ 2.3× the 3bet."""
-    return round(tbet * 2.3, 1)
+def get_4bet_size(tbet: float, stack_bb: float = 100.0) -> float:
+    """Standard 4bet ≈ 2.3× the 3bet; capped at stack."""
+    return min(round(tbet * 2.3, 1), stack_bb)
 
 # ─── Spot parameters ──────────────────────────────────────────────────────────
 
-def get_spot_params(opener: str, facing: str) -> dict:
-    rfi  = RFI_SIZES[opener]
-    tbet = get_3bet_size(rfi, is_ip(facing, opener))
-    fbet = get_4bet_size(tbet)
+def get_spot_params(opener: str, facing: str,
+                    stack_bb: float = 100.0) -> dict:
+    """
+    Return sizing and action-set flags for a given (opener, facing, stack) combo.
+
+    rfi_allin:  True when opener shoves directly (stack ≤ 15BB).
+                → vs_rfi reduces to fold / call  (no 3bet possible)
+    tbet_allin: True when 3bet commits ≥ 80 % of stack.
+                → vs_3bet reduces to fold / call  (no 4bet possible)
+    """
+    rfi  = _rfi_size(opener, stack_bb)
+    tbet = get_3bet_size(rfi, is_ip(facing, opener), stack_bb)
+    fbet = get_4bet_size(tbet, stack_bb)
+
+    rfi_allin  = rfi  >= stack_bb                   # push/fold territory
+    tbet_allin = (not rfi_allin) and (tbet >= stack_bb * 0.8)
+
     return {
         "opener":           opener,
         "facing":           facing,
@@ -61,7 +89,9 @@ def get_spot_params(opener: str, facing: str) -> dict:
         "three_bet_size":   tbet,
         "four_bet_size":    fbet,
         "dead_money":       1.5,   # SB(0.5) + BB(1.0)
-        "stack":            100.0,
+        "stack":            stack_bb,
+        "rfi_allin":        rfi_allin,
+        "tbet_allin":       tbet_allin,
     }
 
 # All 28 (opener, facing) pairs

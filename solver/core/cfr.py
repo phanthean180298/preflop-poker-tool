@@ -132,71 +132,151 @@ _VS3B_ACTIONS  = ("fold", "call", "4bet")
 _VS4B_ACTIONS  = ("fold", "call")
 
 
-def cfr_game(solver, opener, facing, opener_hand, facing_hand, t):
+def cfr_game(solver, opener, facing, opener_hand, facing_hand, t,
+             stack_bb: float = 100.0):
     """
     One External-Sampling MCCFR iteration for a position pair.
 
-    Game sequence:
-      1. Opener  → raise / fold
-      2. Facing  → fold / call / 3bet
-      3. Opener  → fold / call / 4bet
-      4. Facing  → fold / call
+    Game sequence adapts to effective stack depth:
+      All stacks:
+        1. Opener → raise / fold
+      Non-shove stacks (stack > 15BB):
+        2. Facing → fold / call / 3bet
+        3. Opener → fold / call [/ 4bet  (skipped when tbet_allin)]
+        4. Facing → fold / call  (only when 4bet exists)
+      Push/fold stacks (stack ≤ 15BB, rfi_allin):
+        2. Facing → fold / call  (no 3bet, no further streets)
 
     Returns opener EV (in bb).
     """
-    p = get_spot_params(opener, facing)
-    rfi, tbet, fbet, dead = p["rfi_size"], p["three_bet_size"], p["four_bet_size"], p["dead_money"]
+    p = get_spot_params(opener, facing, stack_bb)
+    rfi, tbet, fbet = p["rfi_size"], p["three_bet_size"], p["four_bet_size"]
+    dead       = p["dead_money"]
+    stack      = p["stack"]
+    rfi_allin  = p["rfi_allin"]
+    tbet_allin = p["tbet_allin"]
 
     eq_op = hand_equity(opener_hand, facing_hand, opener, facing)
     eq_fc = 1.0 - eq_op
 
-    rfi_is  = f"{rfi_spot(opener)}:{opener_hand}"
-    vsr_is  = f"{vs_rfi_spot(facing, opener)}:{facing_hand}"
-    v3b_is  = f"{vs_3bet_spot(opener, facing)}:{opener_hand}"
-    v4b_is  = f"{vs_4bet_spot(facing, opener)}:{facing_hand}"
+    rfi_is = f"{rfi_spot(opener)}:{opener_hand}"
+    vsr_is = f"{vs_rfi_spot(facing, opener)}:{facing_hand}"
+    v3b_is = f"{vs_3bet_spot(opener, facing)}:{opener_hand}"
+    v4b_is = f"{vs_4bet_spot(facing, opener)}:{facing_hand}"
 
-    rfi_acts  = list(_RFI_ACTIONS)
-    vsr_acts  = list(_VSRFI_ACTIONS)
-    v3b_acts  = list(_VS3B_ACTIONS)
-    v4b_acts  = list(_VS4B_ACTIONS)
+    rfi_acts = list(_RFI_ACTIONS)
+
+    # Action set for vs_rfi and vs_3bet depends on stack depth
+    if rfi_allin:
+        vsr_acts = ["fold", "call"]   # facing a shove — no 3bet
+    else:
+        vsr_acts = list(_VSRFI_ACTIONS)
+
+    if tbet_allin:
+        v3b_acts = ["fold", "call"]   # 3bet is a shove — no 4bet
+    else:
+        v3b_acts = list(_VS3B_ACTIONS)
+
+    v4b_acts = list(_VS4B_ACTIONS)
 
     if solver.should_prune(rfi_is, rfi_acts, t):
         return 0.0
 
-    s_rfi = solver.current_strategy(rfi_is, rfi_acts, 1.0, t)
-    p_raise = s_rfi["raise"]
-    s_vsr = solver.current_strategy(vsr_is, vsr_acts, p_raise, t)
-    p_3bet = p_raise * s_vsr["3bet"]
-    s_v3b = solver.current_strategy(v3b_is, v3b_acts, p_3bet, t)
-    p_4bet = p_3bet * s_v3b["4bet"]
-    s_v4b = solver.current_strategy(v4b_is, v4b_acts, p_4bet, t)
-
-    # Terminal utilities
+    # ── Pot sizes ──────────────────────────────────────────────────────────────
     pot_rfi_call  = dead + 2 * rfi
+    # When rfi_allin, calling is also an all-in (use stack for both sides)
+    if rfi_allin:
+        pot_rfi_call = dead + 2 * stack
+
     pot_3bet_call = dead + 2 * tbet
     pot_4bet_call = dead + 2 * fbet
 
-    u_fold           = 0.0
-    u_rfi_bbfold     = dead
-    u_rfi_call       = eq_op * pot_rfi_call  - rfi
-    u_3b_opfold      = -rfi
-    u_3b_opcall      = eq_op * pot_3bet_call - tbet
+    # ── Opener RFI strategy ───────────────────────────────────────────────────
+    s_rfi   = solver.current_strategy(rfi_is, rfi_acts, 1.0, t)
+    p_raise = s_rfi["raise"]
+
+    # ── Facing player strategy ────────────────────────────────────────────────
+    s_vsr   = solver.current_strategy(vsr_is, vsr_acts, p_raise, t)
+
+    # ── Terminal utilities (opener perspective) ───────────────────────────────
+    u_fold       = 0.0
+    u_rfi_bbfold = dead if not rfi_allin else dead   # same formula
+    u_rfi_call   = eq_op * pot_rfi_call - (stack if rfi_allin else rfi)
+
+    # ── Push/fold path: no 3bet / 4bet nodes ─────────────────────────────────
+    if rfi_allin:
+        u_after_raise = (s_vsr["fold"] * u_rfi_bbfold
+                        + s_vsr["call"] * u_rfi_call)
+        opener_utils = {"raise": u_after_raise, "fold": u_fold}
+        opener_ev    = s_rfi["raise"] * u_after_raise
+
+        facing_utils = {
+            "fold": 0.0,
+            "call": eq_fc * pot_rfi_call - stack,
+        }
+        facing_ev = sum(s_vsr[a] * facing_utils[a] for a in vsr_acts)
+
+        solver.update(rfi_is, rfi_acts, opener_utils, opener_ev, 1.0, t)
+        solver.update(vsr_is, vsr_acts, facing_utils, facing_ev, p_raise, t)
+        return opener_ev
+
+    # ── Full tree path ────────────────────────────────────────────────────────
+    p_3bet  = p_raise * s_vsr["3bet"]
+    s_v3b   = solver.current_strategy(v3b_is, v3b_acts, p_3bet, t)
+
+    u_3b_opfold = -rfi
+    u_3b_opcall = eq_op * pot_3bet_call - tbet
+
+    if tbet_allin:
+        # 3bet is a shove → no 4bet node; opener can only fold or call all-in
+        u_3b_opcall = eq_op * (dead + 2 * stack) - stack
+        u_vs3b_scenario = (s_v3b["fold"] * u_3b_opfold
+                           + s_v3b["call"] * u_3b_opcall)
+
+        u_after_raise = (s_vsr["fold"] * u_rfi_bbfold
+                        + s_vsr["call"] * u_rfi_call
+                        + s_vsr["3bet"] * u_vs3b_scenario)
+        opener_utils = {"raise": u_after_raise, "fold": u_fold}
+        opener_ev    = s_rfi["raise"] * u_after_raise
+
+        fc_3b_vs_fold = rfi + dead
+        fc_3b_vs_call = eq_fc * (dead + 2 * stack) - stack
+        facing_utils = {
+            "fold": 0.0,
+            "call": eq_fc * pot_rfi_call - rfi,
+            "3bet": s_v3b["fold"] * fc_3b_vs_fold + s_v3b["call"] * fc_3b_vs_call,
+        }
+        facing_ev = sum(s_vsr[a] * facing_utils[a] for a in vsr_acts)
+
+        solver.update(rfi_is, rfi_acts, opener_utils, opener_ev, 1.0, t)
+        solver.update(vsr_is, vsr_acts, facing_utils, facing_ev, p_raise, t)
+
+        vs3b_utils = {"fold": u_3b_opfold, "call": u_3b_opcall}
+        vs3b_ev = sum(s_v3b[a] * vs3b_utils[a] for a in v3b_acts)
+        solver.update(v3b_is, v3b_acts, vs3b_utils, vs3b_ev, p_3bet, t)
+        return opener_ev
+
+    # Standard 4-street path
+    p_4bet  = p_3bet * s_v3b["4bet"]
+    s_v4b   = solver.current_strategy(v4b_is, v4b_acts, p_4bet, t)
+
     pot_before_4bet  = dead + tbet + rfi
     u_4b_fcfold      = pot_before_4bet
     u_4b_call        = eq_op * pot_4bet_call - fbet
 
-    u_v4b_scenario = (s_v4b["fold"] * u_4b_fcfold + s_v4b["call"] * u_4b_call)
+    u_v4b_scenario  = s_v4b["fold"] * u_4b_fcfold + s_v4b["call"] * u_4b_call
     u_vs3b_scenario = (s_v3b["fold"] * u_3b_opfold + s_v3b["call"] * u_3b_opcall
                        + s_v3b["4bet"] * u_v4b_scenario)
-    u_after_raise = (s_vsr["fold"] * u_rfi_bbfold + s_vsr["call"] * u_rfi_call
-                     + s_vsr["3bet"] * u_vs3b_scenario)
+    u_after_raise   = (s_vsr["fold"] * u_rfi_bbfold + s_vsr["call"] * u_rfi_call
+                       + s_vsr["3bet"] * u_vs3b_scenario)
 
     opener_utils = {"raise": u_after_raise, "fold": u_fold}
-    opener_ev    = s_rfi["raise"] * u_after_raise + s_rfi["fold"] * u_fold
+    opener_ev    = s_rfi["raise"] * u_after_raise
 
     fc_3b_vs_fold = rfi + dead
     fc_3b_vs_call = eq_fc * pot_3bet_call - tbet
-    fc_3b_vs_4b   = (s_v4b["fold"] * (-tbet) + s_v4b["call"] * (eq_fc * pot_4bet_call - fbet))
+    fc_3b_vs_4b   = (s_v4b["fold"] * (-tbet)
+                     + s_v4b["call"] * (eq_fc * pot_4bet_call - fbet))
     fc_3b_ev_tree = (s_v3b["fold"] * fc_3b_vs_fold + s_v3b["call"] * fc_3b_vs_call
                      + s_v3b["4bet"] * fc_3b_vs_4b)
 
