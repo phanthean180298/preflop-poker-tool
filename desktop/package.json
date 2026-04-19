@@ -1,0 +1,35 @@
+{
+  "name": "gto-desktop",
+  "version": "1.0.0",
+  "description": "GTO Preflop Wizard - Desktop App",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "concurrently \"npm run vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "vite": "vite",
+    "build": "vite build && electron-builder"
+  },
+  "dependencies": {
+    "axios": "^1.6.8"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^29.1.5",
+    "electron-builder": "^24.13.3",
+    "vite": "^5.2.6",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.gto.wizard",
+    "productName": "GTO Wizard",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  }
+}

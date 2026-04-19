@@ -1,0 +1,15 @@
+{
+  "name": "gto-demo",
+  "version": "1.0.0",
+  "description": "GTO Preflop Wizard - Monorepo",
+  "private": true,
+  "scripts": {
+    "install:all": "cd server && npm install && cd ../desktop && npm install",
+    "server": "cd server && npm run dev",
+    "desktop": "cd desktop && NODE_ENV=development npm start",
+    "dev": "concurrently \"npm run server\" \"npm run desktop\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

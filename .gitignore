@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+server/node_modules/
+desktop/node_modules/
+
+# SQLite database (runtime data)
+server/data/
+
+# Electron build output
+desktop/dist/
+desktop/dist-electron/
+
+# Vite build cache
+desktop/.vite/
+
+# Logs
+*.log
+npm-debug.log*
+
+# macOS
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+
+# Editor
+.vscode/
+.idea/
