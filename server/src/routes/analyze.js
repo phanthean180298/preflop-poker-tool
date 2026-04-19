@@ -68,7 +68,12 @@ Extract the following fields (use null if not visible or unclear):
 }
 
 Rules:
-- "hero" is the player whose hole cards are shown face-up (visible cards)
+- "hero" is the player whose hole cards are shown face-up (visible cards). In most poker clients the hero sits at the BOTTOM of the screen.
+- DEALER BUTTON (D chip): The player whose seat has the yellow "D" or dealer button chip = BTN (Button). Use this as the anchor to assign ALL other positions.
+  - Positions go CLOCKWISE from BTN: BTN → SB → BB → UTG → UTG1 → MP → HJ → CO → (back to BTN)
+  - Count seats clockwise from the D chip to determine each player's position, including hero's.
+  - Example: if D is one seat to hero's LEFT (clockwise), hero is CO. If D is two seats to hero's left, hero is HJ. Etc.
+  - Do NOT assign hero as SB or BB unless they are literally the 1st or 2nd seat clockwise after the BTN.
 - VPIP: the small number in the BOTTOM-LEFT corner of each player's avatar chip (indicates voluntarily-put-money-in-pot %)
 - Bounty (PKO): the number shown ON TOP of / ABOVE each player's avatar chip; do NOT confuse with the bottom-left VPIP number
 - Convert all stacks to BB if shown in chips using the BB blind level
