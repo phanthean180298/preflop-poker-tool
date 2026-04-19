@@ -24,6 +24,7 @@ const express = require("express");
 const router = express.Router();
 const { lookupStrategy } = require("../engine/cfr_loader");
 const { adjustStrategy, bestAction } = require("../engine/ev");
+const { analyzeLocal } = require("../engine/local_ocr");
 
 // ─── Extraction prompt ──────────────────────────────────────────────────────
 const EXTRACTION_PROMPT = `You are a professional poker analyst. Analyze this poker table screenshot and extract ALL available information in JSON format.
@@ -278,12 +279,76 @@ router.post("/table", async (req, res) => {
   const t0 = Date.now();
   const {
     image,
-    model = "gemini-1.5-flash",
+    model = "gemini-2.5-flash",
     api_key,
     gemini_api_key,
   } = req.body;
 
-  // Pick the right key based on model
+  if (!image) {
+    return res
+      .status(400)
+      .json({ error: "Missing required field: image (base64 data URL)" });
+  }
+
+  // ── LOCAL OCR path (no API key needed) ─────────────────────────────────
+  if (model === "local-ocr") {
+    let extracted;
+    try {
+      extracted = await analyzeLocal(image);
+    } catch (err) {
+      return res
+        .status(500)
+        .json({ error: `Local OCR failed: ${err.message}` });
+    }
+    // Still run action lookup if we got a hand
+    const hand = normalizeHand(extracted.hero_hand);
+    const heroPos = (extracted.hero_pos || "BTN").toUpperCase();
+    const villainPos = resolveVillainPos(extracted);
+    const stackBB = Number(extracted.hero_stack_bb || 30);
+    const stage = inferStage(extracted);
+    let actionResult = null;
+    if (hand) {
+      const lookup = lookupStrategy({
+        position: heroPos,
+        vs: villainPos,
+        facing: "open",
+        hand,
+      });
+      if (!lookup.error) {
+        const ctx = {
+          stage,
+          stackBB,
+          villainStackBB: 30,
+          playersLeft: Number(extracted.players_remaining || 100),
+          totalPlayers: Number(extracted.total_players || 1000),
+          bounty: 0,
+          heroBounty: 0,
+          buyIn: 10,
+          pWin: 0.5,
+          spotType: "open",
+        };
+        const { adjusted, factors } = adjustStrategy(lookup.strategy, ctx);
+        const best = bestAction(adjusted);
+        actionResult = {
+          spot: lookup.spot,
+          hand: lookup.hand,
+          strategy: lookup.strategy,
+          adjusted_strategy: adjusted,
+          best_action: best,
+          factors,
+          fallback: lookup.fallback ?? false,
+        };
+      }
+    }
+    return res.json({
+      extracted,
+      action: actionResult,
+      _method: "local-ocr",
+      _ms: Date.now() - t0,
+    });
+  }
+
+  // ── Cloud AI path (Gemini / OpenAI) ────────────────────────────────────
   const apiKey = isGeminiModel(model)
     ? gemini_api_key || process.env.GEMINI_API_KEY || api_key
     : api_key || process.env.OPENAI_API_KEY;
@@ -298,11 +363,6 @@ router.post("/table", async (req, res) => {
       } environment variable.`,
     });
   }
-  if (!image) {
-    return res
-      .status(400)
-      .json({ error: "Missing required field: image (base64 data URL)" });
-  }
 
   // Parse base64 data URL
   let base64, mimeType;
@@ -311,7 +371,6 @@ router.post("/table", async (req, res) => {
     mimeType = dataUrlMatch[1];
     base64 = dataUrlMatch[2];
   } else {
-    // Assume raw base64 PNG
     mimeType = "image/png";
     base64 = image;
   }

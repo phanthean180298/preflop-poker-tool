@@ -41,6 +41,7 @@ const state = {
   geminiApiKey: localStorage.getItem("gemini_api_key") || "",
   analyzeModel: (function () {
     const VALID_MODELS = [
+      "local-ocr",
       "gemini-2.5-flash",
       "gemini-flash-latest",
       "gpt-4o-mini",
@@ -842,6 +843,9 @@ function renderSettingsPanel() {
       <div class="input-group">
         <label>Model</label>
         <select id="s-model">
+          <option value="local-ocr"${
+            state.analyzeModel === "local-ocr" ? " selected" : ""
+          }>&#127968; Local OCR (no API key)</option>
           <option value="gemini-2.5-flash"${
             state.analyzeModel === "gemini-2.5-flash" ? " selected" : ""
           }>gemini-2.5-flash (free, best)</option>
@@ -856,22 +860,34 @@ function renderSettingsPanel() {
           }>gpt-4o (OpenAI)</option>
         </select>
       </div>
-      <div class="input-group" id="s-gemini-row" style="${
+      <div id="s-gemini-row" style="${
         state.analyzeModel.startsWith("gemini") ? "" : "display:none"
       }">
-        <label>Gemini API Key</label>
-        <input id="s-geminikey" type="password" value="${
-          state.geminiApiKey
-        }" placeholder="AIza…" style="flex:1;font-family:monospace;font-size:10px"/>
+        <div class="input-group">
+          <label>Gemini API Key</label>
+          <input id="s-geminikey" type="password" value="${
+            state.geminiApiKey
+          }" placeholder="AIza…" style="flex:1;font-family:monospace;font-size:10px"/>
+        </div>
       </div>
-      <div class="input-group" id="s-openai-row" style="${
-        state.analyzeModel.startsWith("gemini") ? "display:none" : ""
+      <div id="s-openai-row" style="${
+        !state.analyzeModel.startsWith("gemini") &&
+        state.analyzeModel !== "local-ocr"
+          ? ""
+          : "display:none"
       }">
-        <label>OpenAI API Key</label>
-        <input id="s-apikey" type="password" value="${
-          state.analyzeApiKey
-        }" placeholder="sk-…" style="flex:1;font-family:monospace;font-size:10px"/>
+        <div class="input-group">
+          <label>OpenAI API Key</label>
+          <input id="s-apikey" type="password" value="${
+            state.analyzeApiKey
+          }" placeholder="sk-…" style="flex:1;font-family:monospace;font-size:10px"/>
+        </div>
       </div>
+      ${
+        state.analyzeModel === "local-ocr"
+          ? `<div class="ev-note" style="color:var(--warn);margin-top:4px;font-size:10px">⚠ Local OCR: extracts stacks/blinds/tournament info. Card rank via OCR, suit via color. Position must be set manually.</div>`
+          : ""
+      }
       <div style="margin-top:14px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">Import</div>
       <button class="btn-load" id="s-importJson" style="margin-top:6px">Import JSON Range</button>
       <button class="btn-load" id="s-importImg" style="margin-top:6px;background:var(--surface2)">Import Reference Image</button>
@@ -908,10 +924,12 @@ function renderSettingsPanel() {
     state.analyzeModel = e.target.value;
     localStorage.setItem("analyze_model", state.analyzeModel);
     const isGemini = state.analyzeModel.startsWith("gemini");
+    const isLocal = state.analyzeModel === "local-ocr";
     const gr = document.getElementById("s-gemini-row");
     const or = document.getElementById("s-openai-row");
     if (gr) gr.style.display = isGemini ? "" : "none";
-    if (or) or.style.display = isGemini ? "none" : "";
+    if (or) or.style.display = !isGemini && !isLocal ? "" : "none";
+    renderSettingsPanel();
   });
   document.getElementById("s-geminikey").addEventListener("input", (e) => {
     state.geminiApiKey = e.target.value.trim();
@@ -1416,9 +1434,10 @@ function fileToBase64(file) {
 }
 
 async function analyzeScreenshot(file) {
+  const isLocal = state.analyzeModel === "local-ocr";
   const isGemini = state.analyzeModel.startsWith("gemini");
   const activeKey = isGemini ? state.geminiApiKey : state.analyzeApiKey;
-  if (!activeKey) {
+  if (!isLocal && !activeKey) {
     document
       .querySelectorAll(".panel-tab")
       .forEach((t) =>
