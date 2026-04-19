@@ -68,6 +68,28 @@ function normalizeHand(hand) {
   return null;
 }
 
+// ─── Position aliasing ────────────────────────────────────────────────────────
+//
+// The CFR solver is trained on 8-max positions:
+//   UTG, UTG1, MP, HJ, CO, BTN, SB, BB
+//
+// The app front-end uses shorter 6-max labels that must be mapped to solver names.
+// Mapping rationale (positions-before-button):
+//   EP (1st in 6-max, 3 behind BTN) → UTG (1st in 8-max)
+//   MP (2nd in 6-max, 2 behind BTN) → HJ  (4th in 8-max, also 2 behind BTN)
+//   CO, BTN, SB, BB — same in both
+
+const POS_ALIAS = {
+  EP: "UTG",
+  UTG2: "UTG", // 9-max alias
+};
+
+function normalizePos(pos) {
+  if (!pos) return pos;
+  const p = pos.toUpperCase().trim();
+  return POS_ALIAS[p] || p;
+}
+
 /**
  * Resolve spot name from (position, vs, facing) OR from a compressed state object.
  *
@@ -84,8 +106,8 @@ function normalizeHand(hand) {
  *   BB_vs_4bet_BTN
  */
 function resolveSpot(position, vs, facing) {
-  const pos = (position || "").toUpperCase().trim();
-  const opp = (vs || "").toUpperCase().trim();
+  const pos = normalizePos(position || "");
+  const opp = normalizePos(vs || "");
   const face = (facing || "").toLowerCase().trim();
 
   // spot_type aliases (compressed state)
@@ -356,10 +378,18 @@ function lookupStrategy({ spot, position, vs, facing, hand, stackBB = 100 }) {
   if (profileKeys.length > 0) {
     const closestStack = _closestStack(stackBB);
     const map = _profiles[closestStack];
-    const strategy = map && map.get(`${resolvedSpot}:${normalHand}`);
+
+    // Try primary spot, then MP→HJ alias fallback
+    const strategy =
+      map &&
+      (map.get(`${resolvedSpot}:${normalHand}`) ||
+        map.get(`${resolvedSpot.replace(/\bMP\b/g, "HJ")}:${normalHand}`));
     if (strategy) {
+      const usedSpot = map.get(`${resolvedSpot}:${normalHand}`)
+        ? resolvedSpot
+        : resolvedSpot.replace(/\bMP\b/g, "HJ");
       return {
-        spot: resolvedSpot,
+        spot: usedSpot,
         hand: normalHand,
         strategy,
         stackProfile: closestStack,

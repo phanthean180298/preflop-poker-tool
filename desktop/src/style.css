@@ -14,9 +14,9 @@
   --surface: #1c1f30;
   --surface2: #242740;
   --border: #2e3250;
-  --accent: #e84040;    /* raise/aggr – red */
-  --call: #3db554;       /* call – green (GTO+) */
-  --fold: #131828;       /* fold – dark navy */
+  --accent: #e84040; /* raise/aggr – red */
+  --call: #3db554; /* call – green (GTO+) */
+  --fold: #131828; /* fold – dark navy */
   --mixed-raise: #e84040;
   --mixed-call: #3db554;
   --allin: #e84040;

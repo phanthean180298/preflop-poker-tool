@@ -173,8 +173,8 @@ function actionTag(action, freq) {
 // Red=raise/aggr | Green=call | Navy=fold
 function cellBg(d) {
   const RAISE = "#e84040";
-  const CALL  = "#3db554";
-  const FOLD  = "#131828";
+  const CALL = "#3db554";
+  const FOLD = "#131828";
 
   const strat = d.adjusted_strategy || d.strategy;
   if (!strat) {
@@ -183,7 +183,9 @@ function cellBg(d) {
     return RAISE;
   }
 
-  let aggr = 0, call = 0, fold = 0;
+  let aggr = 0,
+    call = 0,
+    fold = 0;
   for (const [a, p] of Object.entries(strat)) {
     if (a === "fold") fold += p;
     else if (a === "call" || a === "limp") call += p;
