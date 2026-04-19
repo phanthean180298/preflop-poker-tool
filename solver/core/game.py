@@ -35,7 +35,7 @@ def is_ip(actor: str, villain: str) -> bool:
 
 # Stack depths (in BB) for which we train separate CFR solutions.
 # Server picks the closest profile to the actual stack.
-STACK_PROFILES: list[int] = [15, 20, 25, 30, 40, 50, 75, 100]
+STACK_PROFILES: list[int] = [10, 15, 20, 25, 30, 40, 50, 75, 100]
 
 # ─── Sizing ────────────────────────────────────────────────────────────────────
 

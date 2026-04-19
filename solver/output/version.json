@@ -203,6 +203,14 @@
       "train_time_s": 15.83,
       "spots": 91,
       "hands": 169
+    },
+    {
+      "version": "v10",
+      "created": "2026-04-19T10:21:06.141903+00:00",
+      "iterations": 2000000,
+      "train_time_s": 8.69,
+      "spots": 35,
+      "hands": 169
     }
   ]
 }

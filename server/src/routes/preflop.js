@@ -202,6 +202,79 @@ router.get("/positions", (req, res) => {
  *   "fallback": false
  * }
  */
+// ─── Helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * Auto-detect tournament stage from players_left / total_players ratio.
+ * Standard MTT payout: ~15% of field makes money; FT = top ~1%.
+ */
+function _detectStage(playersLeft, totalPlayers) {
+  if (!playersLeft || !totalPlayers || totalPlayers <= 0) return null;
+  const ratio = playersLeft / totalPlayers;
+  if (ratio > 0.60) return "early";
+  if (ratio > 0.20) return "mid";
+  if (ratio > 0.08) return "bubble"; // approaching money (15% → bubble zone)
+  if (ratio > 0.02) return "itm";
+  return "ft";
+}
+
+/**
+ * Compute the actual BB sizes for each action in a given spot.
+ * Mirrors sizing logic in solver/core/game.py.
+ * Returns an object like { raise: "2.5BB", fold: "fold" }
+ */
+function computeActionSizing(spotName, stackBB) {
+  if (!spotName) return null;
+  const sb = Number(stackBB) || 100;
+
+  const IP_ORDER = { BB: 0, SB: 1, UTG: 2, UTG1: 3, MP: 4, HJ: 5, CO: 6, BTN: 7 };
+  function isIp(a, b) { return (IP_ORDER[a] ?? 0) > (IP_ORDER[b] ?? 0); }
+  function rfiSize(pos) {
+    if (sb <= 15) return sb;
+    if (sb <= 20) return 2.0;
+    if (sb <= 35) return 2.2;
+    return pos === "SB" ? 3.0 : 2.5;
+  }
+  function tbetSize(rfi, ip) {
+    return Math.min(Math.round(rfi * (ip ? 3.0 : 3.5) * 10) / 10, sb);
+  }
+  function fbetSize(tbet) {
+    return Math.min(Math.round(tbet * 2.3 * 10) / 10, sb);
+  }
+  function bbLabel(n) { return n >= sb ? "allin" : `${n}BB`; }
+
+  const rfiM = spotName.match(/^(\w+)_RFI$/);
+  const vs4M = spotName.match(/^(\w+)_vs_4bet_(\w+)$/);
+  const vs3M = spotName.match(/^(\w+)_vs_3bet_(\w+)$/);
+  const vsRM = spotName.match(/^(\w+)_vs_(\w+)$/);
+
+  if (rfiM) {
+    const sz = rfiSize(rfiM[1]);
+    return { raise: `raise_${bbLabel(sz)}`, fold: "fold" };
+  }
+  if (vs4M) {
+    const [, actor, opener] = vs4M;
+    const rfi = rfiSize(opener);
+    const tbet = tbetSize(rfi, isIp(actor, opener));
+    const fbet = fbetSize(tbet);
+    return { "4bet": `raise_${bbLabel(fbet)}`, call: `call_${bbLabel(tbet)}`, fold: "fold" };
+  }
+  if (vs3M) {
+    const [, opener, tbettor] = vs3M;
+    const rfi = rfiSize(opener);
+    const tbet = tbetSize(rfi, isIp(tbettor, opener));
+    const fbet = fbetSize(tbet);
+    return { "4bet": `raise_${bbLabel(fbet)}`, call: `call_${bbLabel(tbet)}`, fold: "fold" };
+  }
+  if (vsRM) {
+    const [, actor, opener] = vsRM;
+    const rfi = rfiSize(opener);
+    const tbet = tbetSize(rfi, isIp(actor, opener));
+    return { "3bet": `raise_${bbLabel(tbet)}`, call: `call_${bbLabel(rfi)}`, fold: "fold" };
+  }
+  return null;
+}
+
 router.post("/action", (req, res) => {
   const t0 = Date.now();
 
@@ -226,11 +299,17 @@ router.post("/action", (req, res) => {
     villain_stack_bb = 100,
     players_left = null,
     total_players = null,
-    stage = "mid",
+    stage = null,          // null → auto-detect from players_left/total_players
     bounty = 0,
     hero_bounty = 0,
     buyin = 10,
   } = req.body;
+
+  // Auto-detect stage from player counts when not explicitly provided
+  const resolvedStage =
+    stage ||
+    _detectStage(Number(players_left), Number(total_players)) ||
+    "mid";
 
   if (!hand) {
     return res.status(400).json({ error: "Missing required field: hand" });
@@ -296,7 +375,7 @@ router.post("/action", (req, res) => {
   const pWin = 0.25 + hs(lookup.hand) * 0.55; // scale to [0.25, 0.80]
 
   const ctx = {
-    stage,
+    stage: resolvedStage,
     stackBB: Number(stack_bb),
     villainStackBB: Number(villain_stack_bb),
     playersLeft: players_left != null ? Number(players_left) : 100,
@@ -324,13 +403,17 @@ router.post("/action", (req, res) => {
 
   const best = bestAction(finalStrategy);
 
+  const actionSizing = computeActionSizing(lookup.spot, lookup.stackProfile ?? stack_bb);
+
   const result = {
     spot: lookup.spot,
     hand: lookup.hand,
     strategy: lookup.strategy,
     adjusted_strategy: finalStrategy,
     best_action: best,
+    action_sizing: actionSizing,
     factors,
+    stage: resolvedStage,
     stack_profile: lookup.stackProfile ?? 100,
     fallback: lookup.fallback ?? false,
   };
