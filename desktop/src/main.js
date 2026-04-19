@@ -168,6 +168,49 @@ function actionTag(action, freq) {
   if (action === "raise") return state.stackBB <= 15 ? "allin" : "raise";
   return "call";
 }
+
+// Build proportional gradient background matching GTO+ style:
+// Red=raise/aggr | Green=call | Navy=fold
+function cellBg(d) {
+  const RAISE = "#e84040";
+  const CALL  = "#3db554";
+  const FOLD  = "#131828";
+
+  const strat = d.adjusted_strategy || d.strategy;
+  if (!strat) {
+    if (d.action === "fold") return FOLD;
+    if (d.action === "call") return CALL;
+    return RAISE;
+  }
+
+  let aggr = 0, call = 0, fold = 0;
+  for (const [a, p] of Object.entries(strat)) {
+    if (a === "fold") fold += p;
+    else if (a === "call" || a === "limp") call += p;
+    else aggr += p;
+  }
+  const total = aggr + call + fold;
+  if (total < 0.01) return FOLD;
+
+  const ra = aggr / total;
+  const rc = call / total;
+  const rf = fold / total;
+
+  // Pure single color
+  if (ra > 0.995) return RAISE;
+  if (rc > 0.995) return CALL;
+  if (rf > 0.995) return FOLD;
+
+  // Proportional horizontal gradient: raise | call | fold
+  const p1 = (ra * 100).toFixed(1);
+  const p2 = ((ra + rc) * 100).toFixed(1);
+  const stops = [];
+  if (ra > 0.01) stops.push(`${RAISE} 0%`, `${RAISE} ${p1}%`);
+  if (rc > 0.01) stops.push(`${CALL} ${p1}%`, `${CALL} ${p2}%`);
+  if (rf > 0.01) stops.push(`${FOLD} ${p2}%`, `${FOLD} 100%`);
+  if (stops.length < 4) return ra > rc ? RAISE : rc > rf ? CALL : FOLD;
+  return `linear-gradient(to right, ${stops.join(", ")})`;
+}
 function pct(v) {
   return Math.round((v ?? 1) * 100);
 }
@@ -249,12 +292,16 @@ function applyRangeToGrid(rangeData) {
       const d = rangeData[hand];
       if (d) {
         cell.dataset.action = actionTag(d.action, d.freq);
+        cell.style.background = cellBg(d);
+        cell.style.color = d.action === "fold" ? "#5a6488" : "#fff";
         const evStr = d.ev ? ` · EV: ${evLabel(d.ev[d.action])}` : "";
         cell.title = `${hand} → ${d.action.toUpperCase()} ${pct(d.freq)}%${
           d.sizeBB > 0 ? ` (${d.sizeBB.toFixed(1)}bb)` : ""
         }${evStr}`;
       } else {
         delete cell.dataset.action;
+        cell.style.background = "";
+        cell.style.color = "";
       }
     }
   }
@@ -1126,7 +1173,9 @@ function renderActionSeqStrip() {
       return `<span style="color:${color}">${p} <b>${a}</b></span>`;
     });
   const seqLabel = seqParts.length
-    ? `${seqParts.join(" → ")} → <span style="color:#00e8b0">${currentPos} ?</span>`
+    ? `${seqParts.join(
+        " → "
+      )} → <span style="color:#00e8b0">${currentPos} ?</span>`
     : `<span style="color:var(--muted)">Set actions to define the sequence</span>`;
 
   bar.innerHTML = `
@@ -1255,15 +1304,15 @@ async function fetchAllPositions(hand) {
   const results = await Promise.allSettled(
     positions.map((pos) => {
       const body = {
-            hand,
-            action_sequence: buildSeqForPosition(pos),
-            table_size: state.tableSize,
-            stack_bb: state.stackBB,
-            stage: state.tournament.stage,
-            bounty: state.tournament.bounty,
-            hero_bounty: state.tournament.heroBounty,
-            buyin: state.tournament.buyin,
-          };
+        hand,
+        action_sequence: buildSeqForPosition(pos),
+        table_size: state.tableSize,
+        stack_bb: state.stackBB,
+        stage: state.tournament.stage,
+        bounty: state.tournament.bounty,
+        hero_bounty: state.tournament.heroBounty,
+        buyin: state.tournament.buyin,
+      };
       return fetch(`${API}/preflop/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1419,6 +1468,8 @@ async function fetchSingleHand(hand) {
     const cell = document.getElementById(`cell-${hand}`);
     if (cell) {
       cell.dataset.action = actionTag(d.action, d.freq);
+      cell.style.background = cellBg(d);
+      cell.style.color = d.action === "fold" ? "#5a6488" : "#fff";
       cell.classList.remove("loading");
     }
     renderActionSeqStrip();

@@ -14,12 +14,12 @@
   --surface: #1c1f30;
   --surface2: #242740;
   --border: #2e3250;
-  --accent: #e83c3c; /* GTO Wizard red for raise */
-  --call: #3c8fe8; /* blue for call */
-  --fold: #1e2540; /* dark blue for fold */
-  --mixed-raise: #e83c3c;
-  --mixed-call: #3c8fe8;
-  --allin: #c0392b;
+  --accent: #e84040;    /* raise/aggr – red */
+  --call: #3db554;       /* call – green (GTO+) */
+  --fold: #131828;       /* fold – dark navy */
+  --mixed-raise: #e84040;
+  --mixed-call: #3db554;
+  --allin: #e84040;
   --text: #e8eaf6;
   --muted: #6b7499;
   --muted2: #9099be;
@@ -317,7 +317,8 @@ body {
   z-index: 5;
 }
 
-/* Action colors — matching GTO Wizard */
+/* Action colors — proportional gradients applied via JS inline styles */
+/* CSS fallback for static overrides */
 .range-cell[data-action="raise"] {
   background: var(--accent);
   color: #fff;
@@ -331,17 +332,15 @@ body {
   color: #fff;
 }
 .range-cell[data-action="fold"] {
-  background: #1e2745;
-  color: var(--muted);
+  background: var(--fold);
+  color: #5a6488;
 }
 
-/* Mixed: split diagonal */
+/* Mixed: proportional gradient applied inline by JS */
 .range-cell[data-action="mixed"] {
-  background: linear-gradient(135deg, var(--accent) 50%, #3060b0 50%);
   color: #fff;
 }
 .range-cell[data-action="mixed-call"] {
-  background: linear-gradient(135deg, var(--call) 50%, #1e2745 50%);
   color: #fff;
 }
 
