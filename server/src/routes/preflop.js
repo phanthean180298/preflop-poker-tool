@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { query } = require("../engine/preflop");
+const { query, TABLE_POSITIONS } = require("../engine/preflop");
 const { makeCacheKey, getCached, setCache } = require("../middleware/cache");
 
 /**
@@ -28,14 +28,13 @@ router.post("/query", (req, res) => {
       ante_bb = 0,
       rfi_size_bb = 2.5,
       three_bet_size_bb = 7.5,
+      table_size = 6,
     } = req.body;
 
     if (!action || !hand || !position || stack_bb == null) {
-      return res
-        .status(400)
-        .json({
-          error: "Missing required fields: action, hand, position, stack_bb",
-        });
+      return res.status(400).json({
+        error: "Missing required fields: action, hand, position, stack_bb",
+      });
     }
 
     const params = {
@@ -47,6 +46,7 @@ router.post("/query", (req, res) => {
       anteBB: Number(ante_bb),
       rfiSizeBB: Number(rfi_size_bb),
       threeBetSizeBB: Number(three_bet_size_bb),
+      tableSize: Number(table_size),
     };
 
     const cacheKey = makeCacheKey(params);
@@ -75,6 +75,7 @@ router.get("/range", (req, res) => {
       stack_bb = 40,
       ante_bb = 0,
       vs_position,
+      table_size = 6,
     } = req.query;
     if (!position) return res.status(400).json({ error: "position required" });
 
@@ -113,6 +114,7 @@ router.get("/range", (req, res) => {
           vsPosition: vs_position ? vs_position.toUpperCase() : null,
           stackBB: Number(stack_bb),
           anteBB: Number(ante_bb),
+          tableSize: Number(table_size),
         };
 
         const cacheKey = makeCacheKey(params);
@@ -123,10 +125,20 @@ router.get("/range", (req, res) => {
       }
     }
 
-    res.json({ position, action, stack_bb, range });
+    res.json({ position, action, stack_bb, table_size, range });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+/**
+ * GET /api/preflop/positions?table_size=6
+ * Returns position list for given table size
+ */
+router.get("/positions", (req, res) => {
+  const { table_size = 6 } = req.query;
+  const positions = TABLE_POSITIONS[Number(table_size)] || TABLE_POSITIONS[6];
+  res.json({ table_size: Number(table_size), positions });
 });
 
 module.exports = router;

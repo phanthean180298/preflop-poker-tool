@@ -4,6 +4,7 @@ const path = require("path");
 const { initDB } = require("./utils/db");
 const preflopRouter = require("./routes/preflop");
 const sessionRouter = require("./routes/session");
+const icmRouter = require("./routes/icm");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -18,6 +19,7 @@ initDB();
 // Routes
 app.use("/api/preflop", preflopRouter);
 app.use("/api/session", sessionRouter);
+app.use("/api/icm", icmRouter);
 
 app.get("/health", (req, res) =>
   res.json({ status: "ok", timestamp: new Date().toISOString() })
