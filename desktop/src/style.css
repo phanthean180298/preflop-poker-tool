@@ -1424,7 +1424,8 @@ body {
 .aseq-card.acted {
   border-color: #4a9eff44;
 }
-.aseq-card.hero {
+.aseq-card.hero,
+.aseq-card.current {
   border-color: #00e8b0;
   background: #00e8b012;
 }
