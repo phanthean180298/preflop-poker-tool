@@ -109,14 +109,12 @@ async function callGeminiAPI(base64Image, mimeType, model, apiKey) {
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    const msg =
-      err.error?.message || `Gemini API error: ${response.status}`;
+    const msg = err.error?.message || `Gemini API error: ${response.status}`;
     throw new Error(msg);
   }
 
   const data = await response.json();
-  const content =
-    data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
   return JSON.parse(cleanJSON(content));
 }
 
@@ -264,13 +262,17 @@ router.post("/table", async (req, res) => {
 
   // Pick the right key based on model
   const apiKey = isGeminiModel(model)
-    ? (gemini_api_key || process.env.GEMINI_API_KEY || api_key)
-    : (api_key || process.env.OPENAI_API_KEY);
+    ? gemini_api_key || process.env.GEMINI_API_KEY || api_key
+    : api_key || process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
     const providerName = isGeminiModel(model) ? "Gemini" : "OpenAI";
     return res.status(400).json({
-      error: `${providerName} API key required. Pass ${isGeminiModel(model) ? "gemini_api_key" : "api_key"} in request body or set ${isGeminiModel(model) ? "GEMINI_API_KEY" : "OPENAI_API_KEY"} environment variable.`,
+      error: `${providerName} API key required. Pass ${
+        isGeminiModel(model) ? "gemini_api_key" : "api_key"
+      } in request body or set ${
+        isGeminiModel(model) ? "GEMINI_API_KEY" : "OPENAI_API_KEY"
+      } environment variable.`,
     });
   }
   if (!image) {

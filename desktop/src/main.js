@@ -39,7 +39,13 @@ const state = {
   positionCache: {},
   analyzeApiKey: localStorage.getItem("openai_api_key") || "",
   geminiApiKey: localStorage.getItem("gemini_api_key") || "",
-  analyzeModel: localStorage.getItem("analyze_model") || "gemini-1.5-flash",
+  analyzeModel: (function() {
+    const VALID_MODELS = ["gemini-2.5-flash","gemini-flash-latest","gpt-4o-mini","gpt-4o"];
+    const saved = localStorage.getItem("analyze_model");
+    if (saved && VALID_MODELS.includes(saved)) return saved;
+    localStorage.setItem("analyze_model", "gemini-2.5-flash");
+    return "gemini-2.5-flash";
+  })(),
   lastAnalysis: null,
 };
 
@@ -831,12 +837,12 @@ function renderSettingsPanel() {
       <div class="input-group">
         <label>Model</label>
         <select id="s-model">
-          <option value="gemini-1.5-flash"${
-            state.analyzeModel === "gemini-1.5-flash" ? " selected" : ""
-          }>gemini-1.5-flash (free)</option>
-          <option value="gemini-1.5-pro"${
-            state.analyzeModel === "gemini-1.5-pro" ? " selected" : ""
-          }>gemini-1.5-pro (better)</option>
+          <option value="gemini-2.5-flash"${
+            state.analyzeModel === "gemini-2.5-flash" ? " selected" : ""
+          }>gemini-2.5-flash (free, best)</option>
+          <option value="gemini-flash-latest"${
+            state.analyzeModel === "gemini-flash-latest" ? " selected" : ""
+          }>gemini-flash-latest (free, alias)</option>
           <option value="gpt-4o-mini"${
             state.analyzeModel === "gpt-4o-mini" ? " selected" : ""
           }>gpt-4o-mini (OpenAI)</option>
@@ -907,10 +913,11 @@ function renderSettingsPanel() {
     localStorage.setItem("gemini_api_key", state.geminiApiKey);
   });
   const apikeyEl = document.getElementById("s-apikey");
-  if (apikeyEl) apikeyEl.addEventListener("input", (e) => {
-    state.analyzeApiKey = e.target.value.trim();
-    localStorage.setItem("openai_api_key", state.analyzeApiKey);
-  });
+  if (apikeyEl)
+    apikeyEl.addEventListener("input", (e) => {
+      state.analyzeApiKey = e.target.value.trim();
+      localStorage.setItem("openai_api_key", state.analyzeApiKey);
+    });
   document
     .getElementById("s-importJson")
     .addEventListener("click", () =>
@@ -1416,7 +1423,9 @@ async function analyzeScreenshot(file) {
     const focusId = isGemini ? "s-geminikey" : "s-apikey";
     document.getElementById(focusId)?.focus();
     const providerName = isGemini ? "Gemini" : "OpenAI";
-    alert(`Please enter your ${providerName} API key in the Settings panel first.`);
+    alert(
+      `Please enter your ${providerName} API key in the Settings panel first.`
+    );
     return;
   }
 

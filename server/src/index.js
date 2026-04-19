@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3001;
 
 // Allow access from LAN devices
 app.use(cors({ origin: "*" }));
-app.use(express.json());
+app.use(express.json({ limit: "20mb" }));
 
 // Init SQLite DB
 initDB();
