@@ -38,7 +38,8 @@ const state = {
   refImage: null,
   positionCache: {},
   analyzeApiKey: localStorage.getItem("openai_api_key") || "",
-  analyzeModel: localStorage.getItem("analyze_model") || "gpt-4o-mini",
+  geminiApiKey: localStorage.getItem("gemini_api_key") || "",
+  analyzeModel: localStorage.getItem("analyze_model") || "gemini-1.5-flash",
   lastAnalysis: null,
 };
 
@@ -828,21 +829,37 @@ function renderSettingsPanel() {
       </div>
       <div style="margin-top:14px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">AI Screenshot Analysis</div>
       <div class="input-group">
+        <label>Model</label>
+        <select id="s-model">
+          <option value="gemini-1.5-flash"${
+            state.analyzeModel === "gemini-1.5-flash" ? " selected" : ""
+          }>gemini-1.5-flash (free)</option>
+          <option value="gemini-1.5-pro"${
+            state.analyzeModel === "gemini-1.5-pro" ? " selected" : ""
+          }>gemini-1.5-pro (better)</option>
+          <option value="gpt-4o-mini"${
+            state.analyzeModel === "gpt-4o-mini" ? " selected" : ""
+          }>gpt-4o-mini (OpenAI)</option>
+          <option value="gpt-4o"${
+            state.analyzeModel === "gpt-4o" ? " selected" : ""
+          }>gpt-4o (OpenAI)</option>
+        </select>
+      </div>
+      <div class="input-group" id="s-gemini-row" style="${
+        state.analyzeModel.startsWith("gemini") ? "" : "display:none"
+      }">
+        <label>Gemini API Key</label>
+        <input id="s-geminikey" type="password" value="${
+          state.geminiApiKey
+        }" placeholder="AIza…" style="flex:1;font-family:monospace;font-size:10px"/>
+      </div>
+      <div class="input-group" id="s-openai-row" style="${
+        state.analyzeModel.startsWith("gemini") ? "display:none" : ""
+      }">
         <label>OpenAI API Key</label>
         <input id="s-apikey" type="password" value="${
           state.analyzeApiKey
         }" placeholder="sk-…" style="flex:1;font-family:monospace;font-size:10px"/>
-      </div>
-      <div class="input-group">
-        <label>Model</label>
-        <select id="s-model">
-          <option value="gpt-4o-mini"${
-            state.analyzeModel === "gpt-4o-mini" ? " selected" : ""
-          }>gpt-4o-mini (fast)</option>
-          <option value="gpt-4o"${
-            state.analyzeModel === "gpt-4o" ? " selected" : ""
-          }>gpt-4o (accurate)</option>
-        </select>
       </div>
       <div style="margin-top:14px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">Import</div>
       <button class="btn-load" id="s-importJson" style="margin-top:6px">Import JSON Range</button>
@@ -876,13 +893,23 @@ function renderSettingsPanel() {
   document.getElementById("s-heroBounty").addEventListener("input", (e) => {
     state.tournament.heroBounty = Number(e.target.value);
   });
-  document.getElementById("s-apikey").addEventListener("input", (e) => {
-    state.analyzeApiKey = e.target.value.trim();
-    localStorage.setItem("openai_api_key", state.analyzeApiKey);
-  });
   document.getElementById("s-model").addEventListener("change", (e) => {
     state.analyzeModel = e.target.value;
     localStorage.setItem("analyze_model", state.analyzeModel);
+    const isGemini = state.analyzeModel.startsWith("gemini");
+    const gr = document.getElementById("s-gemini-row");
+    const or = document.getElementById("s-openai-row");
+    if (gr) gr.style.display = isGemini ? "" : "none";
+    if (or) or.style.display = isGemini ? "none" : "";
+  });
+  document.getElementById("s-geminikey").addEventListener("input", (e) => {
+    state.geminiApiKey = e.target.value.trim();
+    localStorage.setItem("gemini_api_key", state.geminiApiKey);
+  });
+  const apikeyEl = document.getElementById("s-apikey");
+  if (apikeyEl) apikeyEl.addEventListener("input", (e) => {
+    state.analyzeApiKey = e.target.value.trim();
+    localStorage.setItem("openai_api_key", state.analyzeApiKey);
   });
   document
     .getElementById("s-importJson")
@@ -1377,16 +1404,19 @@ function fileToBase64(file) {
 }
 
 async function analyzeScreenshot(file) {
-  if (!state.analyzeApiKey) {
-    // Switch to settings tab so user can enter their key
+  const isGemini = state.analyzeModel.startsWith("gemini");
+  const activeKey = isGemini ? state.geminiApiKey : state.analyzeApiKey;
+  if (!activeKey) {
     document
       .querySelectorAll(".panel-tab")
       .forEach((t) =>
         t.classList.toggle("active", t.dataset.tab === "settings")
       );
     renderSettingsPanel();
-    document.getElementById("s-apikey")?.focus();
-    alert("Please enter your OpenAI API key in the Settings panel first.");
+    const focusId = isGemini ? "s-geminikey" : "s-apikey";
+    document.getElementById(focusId)?.focus();
+    const providerName = isGemini ? "Gemini" : "OpenAI";
+    alert(`Please enter your ${providerName} API key in the Settings panel first.`);
     return;
   }
 
@@ -1416,7 +1446,8 @@ async function analyzeScreenshot(file) {
       body: JSON.stringify({
         image: base64,
         model: state.analyzeModel,
-        api_key: state.analyzeApiKey,
+        api_key: state.analyzeApiKey || undefined,
+        gemini_api_key: state.geminiApiKey || undefined,
       }),
     });
     const data = await resp.json();
@@ -1463,9 +1494,11 @@ async function analyzeScreenshot(file) {
     };
     if (ex._spot_type && SPOT_TO_SCENARIO[ex._spot_type]) {
       state.scenario = SPOT_TO_SCENARIO[ex._spot_type];
-      document.querySelectorAll("#scenarioTabs button").forEach((b) =>
-        b.classList.toggle("active", b.dataset.val === state.scenario)
-      );
+      document
+        .querySelectorAll("#scenarioTabs button")
+        .forEach((b) =>
+          b.classList.toggle("active", b.dataset.val === state.scenario)
+        );
       updateTopbarVisibility();
     }
 

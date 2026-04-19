@@ -75,8 +75,53 @@ Rules:
 - For tournament stage, infer: level 1-4 = "early", 5-8 = "mid", near final tables = "ft", near money bubble = "bubble", in money = "itm"
 - Return ONLY valid JSON, no markdown fences, no explanation`;
 
+// ─── Detect provider from model name ──────────────────────────────────────
+function isGeminiModel(model) {
+  return model.startsWith("gemini");
+}
+
+// ─── Strip markdown fences from LLM response ──────────────────────────────
+function cleanJSON(text) {
+  return text
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+}
+
+// ─── Call Gemini vision API (free tier: gemini-1.5-flash) ─────────────────
+async function callGeminiAPI(base64Image, mimeType, model, apiKey) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            { inline_data: { mime_type: mimeType, data: base64Image } },
+            { text: EXTRACTION_PROMPT },
+          ],
+        },
+      ],
+      generationConfig: { temperature: 0, maxOutputTokens: 1200 },
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    const msg =
+      err.error?.message || `Gemini API error: ${response.status}`;
+    throw new Error(msg);
+  }
+
+  const data = await response.json();
+  const content =
+    data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  return JSON.parse(cleanJSON(content));
+}
+
 // ─── Call OpenAI vision API ─────────────────────────────────────────────────
-async function callVisionAPI(base64Image, mimeType, model, apiKey) {
+async function callOpenAIAPI(base64Image, mimeType, model, apiKey) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -114,13 +159,15 @@ async function callVisionAPI(base64Image, mimeType, model, apiKey) {
 
   const data = await response.json();
   const content = data.choices?.[0]?.message?.content ?? "";
+  return JSON.parse(cleanJSON(content));
+}
 
-  // Strip markdown fences if model wraps response
-  const cleaned = content
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "")
-    .trim();
-  return JSON.parse(cleaned);
+// ─── Unified vision dispatcher ─────────────────────────────────────────────
+async function callVisionAPI(base64Image, mimeType, model, apiKey) {
+  if (isGeminiModel(model)) {
+    return callGeminiAPI(base64Image, mimeType, model, apiKey);
+  }
+  return callOpenAIAPI(base64Image, mimeType, model, apiKey);
 }
 
 // ─── Infer tournament stage from level ─────────────────────────────────────
@@ -208,13 +255,22 @@ function resolveVillainPos(extracted) {
 // ─── Route handler ──────────────────────────────────────────────────────────
 router.post("/table", async (req, res) => {
   const t0 = Date.now();
-  const { image, model = "gpt-4o-mini", api_key } = req.body;
+  const {
+    image,
+    model = "gemini-1.5-flash",
+    api_key,
+    gemini_api_key,
+  } = req.body;
 
-  const apiKey = api_key || process.env.OPENAI_API_KEY;
+  // Pick the right key based on model
+  const apiKey = isGeminiModel(model)
+    ? (gemini_api_key || process.env.GEMINI_API_KEY || api_key)
+    : (api_key || process.env.OPENAI_API_KEY);
+
   if (!apiKey) {
+    const providerName = isGeminiModel(model) ? "Gemini" : "OpenAI";
     return res.status(400).json({
-      error:
-        "OpenAI API key required. Pass api_key in request body or set OPENAI_API_KEY environment variable.",
+      error: `${providerName} API key required. Pass ${isGeminiModel(model) ? "gemini_api_key" : "api_key"} in request body or set ${isGeminiModel(model) ? "GEMINI_API_KEY" : "OPENAI_API_KEY"} environment variable.`,
     });
   }
   if (!image) {
