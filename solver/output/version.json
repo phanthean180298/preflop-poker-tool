@@ -1,5 +1,5 @@
 {
-  "current": "v10",
+  "current": "v14",
   "versions": [
     "v2",
     "v3",
@@ -9,7 +9,11 @@
     "v7",
     "v8",
     "v9",
-    "v10"
+    "v10",
+    "v11",
+    "v12",
+    "v13",
+    "v14"
   ],
   "history": [
     {
@@ -210,6 +214,38 @@
       "iterations": 2000000,
       "train_time_s": 8.69,
       "spots": 35,
+      "hands": 169
+    },
+    {
+      "version": "v11",
+      "created": "2026-04-19T11:42:39.846407+00:00",
+      "iterations": 3000000,
+      "train_time_s": 18.39,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v12",
+      "created": "2026-04-19T11:46:00.438076+00:00",
+      "iterations": 3000000,
+      "train_time_s": 15.43,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v13",
+      "created": "2026-04-19T11:52:29.046927+00:00",
+      "iterations": 3000000,
+      "train_time_s": 14.93,
+      "spots": 91,
+      "hands": 169
+    },
+    {
+      "version": "v14",
+      "created": "2026-04-19T11:54:58.122577+00:00",
+      "iterations": 3000000,
+      "train_time_s": 21.13,
+      "spots": 91,
       "hands": 169
     }
   ]

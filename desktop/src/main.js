@@ -371,21 +371,26 @@ function renderHandOverview(hand, d) {
   // Read per-action frequencies directly from strategy (handles 3bet, 4bet, etc.)
   const strat = d.adjusted_strategy || d.strategy || {};
   // "aggr" bucket = raise + 3bet + 4bet; "call" bucket = call; "fold" = fold
-  let aggrFreq = 0, callFreq = 0, foldFreq = 0;
+  let aggrFreq = 0,
+    callFreq = 0,
+    foldFreq = 0;
   for (const [a, p] of Object.entries(strat)) {
     if (a === "fold") foldFreq += p;
     else if (a === "call" || a === "limp") callFreq += p;
     else aggrFreq += p;
   }
   const raisePct = Math.round(aggrFreq * 100);
-  const callPct  = Math.round(callFreq * 100);
-  const foldPct  = Math.round(foldFreq * 100);
-  const activeCombos = Math.round(((rc * aggrFreq) * 10)) / 10;
+  const callPct = Math.round(callFreq * 100);
+  const foldPct = Math.round(foldFreq * 100);
+  const activeCombos = Math.round(rc * aggrFreq * 10) / 10;
 
   // Label for the aggr box: raise / 3bet / 4bet / shove
-  const aggrLabel = d.pushFoldMode ? "Shove"
-    : d.action === "3bet" ? "3Bet"
-    : d.action === "4bet" ? "4Bet"
+  const aggrLabel = d.pushFoldMode
+    ? "Shove"
+    : d.action === "3bet"
+    ? "3Bet"
+    : d.action === "4bet"
+    ? "4Bet"
     : "Raise";
 
   const evHtml = d.ev
@@ -475,7 +480,9 @@ function renderHandOverview(hand, d) {
       <div class="action-box call">
         <div class="ab-label">Call</div>
         <div class="ab-pct">${callPct}%</div>
-        <div class="ab-combos">${callPct > 0 ? Math.round(rc * callFreq * 10) / 10 : 0} comb</div>
+        <div class="ab-combos">${
+          callPct > 0 ? Math.round(rc * callFreq * 10) / 10 : 0
+        } comb</div>
         ${
           d.ev && d.ev.call != null
             ? `<div class="ab-ev ${d.ev.call >= 0 ? "pos" : "neg"}">${evLabel(
@@ -487,9 +494,7 @@ function renderHandOverview(hand, d) {
       <div class="action-box fold">
         <div class="ab-label">Fold</div>
         <div class="ab-pct">${foldPct}%</div>
-        <div class="ab-combos">${
-          Math.round(rc * foldFreq * 10) / 10
-        } comb</div>
+        <div class="ab-combos">${Math.round(rc * foldFreq * 10) / 10} comb</div>
         <div class="ab-ev neutral">+0.00 BB</div>
       </div>
     </div>
@@ -512,7 +517,17 @@ function renderEVPanel(hand, d) {
   }
   const ev = d.ev;
   const actions = [
-    { key: "raise", label: d.pushFoldMode ? "Shove" : d.action === "3bet" ? "3Bet" : d.action === "4bet" ? "4Bet" : "Raise", val: ev.raise },
+    {
+      key: "raise",
+      label: d.pushFoldMode
+        ? "Shove"
+        : d.action === "3bet"
+        ? "3Bet"
+        : d.action === "4bet"
+        ? "4Bet"
+        : "Raise",
+      val: ev.raise,
+    },
     { key: "call", label: "Call", val: ev.call ?? null },
     { key: "fold", label: "Fold", val: 0 },
   ].filter((a) => a.val !== null);

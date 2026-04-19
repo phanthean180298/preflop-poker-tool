@@ -30,9 +30,35 @@ from collections import defaultdict
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.game import ALL_HANDS, HAND_WEIGHTS, ALL_PAIRS
+from core.game import ALL_HANDS, HAND_WEIGHTS, ALL_PAIRS, POSITION_INDEX
 from core.cfr  import CFRSolver, cfr_game, _float_dict
 from pipeline.export import export_strategies
+
+# ─── Multi-player fold equity weights ────────────────────────────────────────
+#
+# In a real 8-max preflop game, when UTG raises, all intermediate players
+# (UTG1, MP, HJ, CO, BTN, SB) must fold before BB even gets to act.
+# The solver's 2-player model (opener vs facing) doesn't account for this,
+# causing early positions to massively overestimate fold equity and raise too wide.
+#
+# Fix: weight each (opener, facing) pair by the probability that all intermediate
+# players folded before reaching this heads-up confrontation.
+#
+#   P = AVG_FOLD_RATE ^ n_intermediate_players
+#
+# AVG_FOLD_RATE: average probability that one intermediate player folds to a raise.
+# Empirically ~0.78 (intermediate players face a raise cold; most fold).
+# This calibrates UTG range to ~15-17% as expected by GTO theory.
+#
+AVG_FOLD_RATE = 0.78  # probability each intermediate player folds to a raise
+
+def _pair_fold_discount(opener: str, facing: str) -> float:
+    """P(all intermediate players between opener and facing folded)."""
+    n_intermediate = POSITION_INDEX[facing] - POSITION_INDEX[opener] - 1
+    return AVG_FOLD_RATE ** n_intermediate
+
+# Precompute for all pairs
+PAIR_FOLD_DISCOUNTS = [_pair_fold_discount(o, f) for o, f in ALL_PAIRS]
 
 
 # ─── Warm-start: load strategy_sum from previous version ─────────────────────
@@ -101,7 +127,8 @@ def _worker(args: tuple) -> CFRSolver:
         opener_hand    = random.choices(ALL_HANDS, weights=HAND_WEIGHTS, k=1)[0]
         facing_hand    = random.choices(ALL_HANDS, weights=HAND_WEIGHTS, k=1)[0]
         cfr_game(solver, opener, facing, opener_hand, facing_hand, t,
-                 stack_bb=stack_bb)
+                 stack_bb=stack_bb,
+                 fold_discount=PAIR_FOLD_DISCOUNTS[pair_idx])
     solver.iterations = shard_iters
     return solver
 
@@ -160,7 +187,8 @@ def train(iterations: int, seed: int = 42,
             opener_hand = random.choices(ALL_HANDS, weights=HAND_WEIGHTS, k=1)[0]
             facing_hand = random.choices(ALL_HANDS, weights=HAND_WEIGHTS, k=1)[0]
             cfr_game(solver, opener, facing, opener_hand, facing_hand, t,
-                     stack_bb=stack_bb)
+                     stack_bb=stack_bb,
+                     fold_discount=PAIR_FOLD_DISCOUNTS[pair_idx])
             if local_t % checkpoint == 0:
                 now  = time.perf_counter()
                 rate = checkpoint / (now - t_last)

@@ -33,7 +33,7 @@ def _float_dict():
 
 
 from .game import (
-    ALL_HANDS, HAND_WEIGHTS, ALL_PAIRS, get_spot_params, hand_equity,
+    ALL_HANDS, HAND_WEIGHTS, ALL_PAIRS, POSITION_INDEX, get_spot_params, hand_equity,
     rfi_spot, vs_rfi_spot, vs_3bet_spot, vs_4bet_spot,
 )
 
@@ -44,6 +44,41 @@ BURN_IN_ITERS    = 2_000    # no pruning for first N iterations
 DCFR_ALPHA       = 1.5      # regret decay exponent  (≥1 → aggressive discard)
 DCFR_BETA        = 0.0      # strategy decay exponent (0 → keep all accumulation)
 DCFR_GAMMA       = 2.0      # linear weight exponent on strategy_sum
+
+# ─── Multiway penalty ─────────────────────────────────────────────────────────
+#
+# This 2-player model trains each (opener, facing) pair in isolation, which
+# overstates raise EV for early positions. In a real 8-max game, after UTG
+# raises, 6 other players (UTG1..BB) can call/3-bet, creating multiway pots
+# that severely hurt UTG's equity. This penalty approximates that EV loss.
+#
+# n_unaccounted = N_PLAYERS - POSITION_INDEX[opener] - 2
+#   = 6 for UTG  (must go through 6 players not modeled)
+#   = 3 for HJ
+#   = 1 for BTN
+#   = 0 for SB   (pure HU vs BB, no penalty)
+#
+# penalty = n_unaccounted × MULTIWAY_CALL_RATE × MULTIWAY_PENALTY_BB
+# Calibrated so UTG raises ~15-17%, BTN raises ~44-48%.
+#
+N_GAME_PLAYERS      = 8      # 8-max
+MULTIWAY_CALL_RATE  = 0.15   # avg P(each unaccounted player enters pot)
+MULTIWAY_PENALTY_BB = 1.5    # EV reduction in BB per expected extra caller
+
+# Position-specific raise EV penalty (in BB).
+# Accounts for unmodeled players who can call/squeeze behind opener.
+# Calibrated to produce GTO-realistic open ranges at 100BB:
+#   UTG ~15%, UTG1 ~19%, MP ~24%, HJ ~28%, CO ~36%, BTN ~47%, SB ~62%
+POSITION_RAISE_PENALTY: dict[str, float] = {
+    "UTG":  1.20,
+    "UTG1": 1.00,
+    "MP":   0.85,
+    "HJ":   0.72,
+    "CO":   0.58,
+    "BTN":  0.68,   # faces SB+BB jointly → larger than formula suggests
+    "SB":   0.40,
+    "BB":   0.00,
+}
 
 # ─── Core data structure ─────────────────────────────────────────────────────
 
@@ -133,7 +168,7 @@ _VS4B_ACTIONS  = ("fold", "call")
 
 
 def cfr_game(solver, opener, facing, opener_hand, facing_hand, t,
-             stack_bb: float = 100.0):
+             stack_bb: float = 100.0, fold_discount: float = 1.0):
     """
     One External-Sampling MCCFR iteration for a position pair.
 
@@ -146,6 +181,11 @@ def cfr_game(solver, opener, facing, opener_hand, facing_hand, t,
         4. Facing → fold / call  (only when 4bet exists)
       Push/fold stacks (stack ≤ 15BB, rfi_allin):
         2. Facing → fold / call  (no 3bet, no further streets)
+
+    fold_discount: probability that all intermediate players between opener and
+        facing folded before this heads-up confrontation. Scales regret updates
+        to correctly model multi-player fold equity for early position openers.
+        E.g. for (UTG, BB) with 6 intermediate players: 0.82^6 ≈ 0.26.
 
     Returns opener EV (in bb).
     """
@@ -198,6 +238,12 @@ def cfr_game(solver, opener, facing, opener_hand, facing_hand, t,
     # ── Facing player strategy ────────────────────────────────────────────────
     s_vsr   = solver.current_strategy(vsr_is, vsr_acts, p_raise, t)
 
+    # ── Multiway pot penalty ──────────────────────────────────────────────────
+    # Account for the EV loss from unmodeled players (callers behind, squeezers).
+    # n_unaccounted is constant per opener, independent of which facing player.
+    n_unaccounted = N_GAME_PLAYERS - POSITION_INDEX.get(opener, 0) - 2
+    multiway_penalty = POSITION_RAISE_PENALTY.get(opener, max(0, n_unaccounted) * MULTIWAY_CALL_RATE * MULTIWAY_PENALTY_BB)
+
     # ── Terminal utilities (opener perspective) ───────────────────────────────
     u_fold       = 0.0
     u_rfi_bbfold = dead if not rfi_allin else dead   # same formula
@@ -206,7 +252,7 @@ def cfr_game(solver, opener, facing, opener_hand, facing_hand, t,
     # ── Push/fold path: no 3bet / 4bet nodes ─────────────────────────────────
     if rfi_allin:
         u_after_raise = (s_vsr["fold"] * u_rfi_bbfold
-                        + s_vsr["call"] * u_rfi_call)
+                        + s_vsr["call"] * u_rfi_call) - multiway_penalty
         opener_utils = {"raise": u_after_raise, "fold": u_fold}
         opener_ev    = s_rfi["raise"] * u_after_raise
 
@@ -235,7 +281,7 @@ def cfr_game(solver, opener, facing, opener_hand, facing_hand, t,
 
         u_after_raise = (s_vsr["fold"] * u_rfi_bbfold
                         + s_vsr["call"] * u_rfi_call
-                        + s_vsr["3bet"] * u_vs3b_scenario)
+                        + s_vsr["3bet"] * u_vs3b_scenario) - multiway_penalty
         opener_utils = {"raise": u_after_raise, "fold": u_fold}
         opener_ev    = s_rfi["raise"] * u_after_raise
 
@@ -268,7 +314,7 @@ def cfr_game(solver, opener, facing, opener_hand, facing_hand, t,
     u_vs3b_scenario = (s_v3b["fold"] * u_3b_opfold + s_v3b["call"] * u_3b_opcall
                        + s_v3b["4bet"] * u_v4b_scenario)
     u_after_raise   = (s_vsr["fold"] * u_rfi_bbfold + s_vsr["call"] * u_rfi_call
-                       + s_vsr["3bet"] * u_vs3b_scenario)
+                       + s_vsr["3bet"] * u_vs3b_scenario) - multiway_penalty
 
     opener_utils = {"raise": u_after_raise, "fold": u_fold}
     opener_ev    = s_rfi["raise"] * u_after_raise
